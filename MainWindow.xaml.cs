@@ -354,13 +354,28 @@ namespace CWDM_Control_Board_GUI
         private List<ADCRegister> refreshADCRegisters()
         {
             List<ADCRegister> registers = new List<ADCRegister>();
-            for (int i = 0; i < adc_registers.Length; i++)
+            for (int i = 0; i < adc_registers.Length;)
             {
-                
-                (string name, ushort address) = adc_registers[i];
-                int value = usb_connection.SendReadCommand(address, 1);
-                if (value == -5) return null;
-                registers.Add(new ADCRegister { Name = name, RegisterValue = value });
+                int len = adc_registers.Length - i >= 10 ? 10 : adc_registers.Length - i;
+                string[] names = new string[len];
+                ushort[] regAddr = new ushort[len];
+                for(int j = 0; j < len && i + j < adc_registers.Length; j++)
+				{
+                    (names[j],regAddr[j]) = adc_registers[i + j];
+				}
+                int[] values = usb_connection.SendReadCommands(regAddr);
+                for (int j = 0; j < len; j++)
+                {
+                    if (values.Length == 1 && values[0] < 0)
+                    {
+                        registers.Add(new ADCRegister { Name = names[j], RegisterValue = values[0] });
+                    }
+                    else
+                    {
+                        registers.Add(new ADCRegister { Name = names[j], RegisterValue = values[j] });
+                    }
+                }
+                i += len;
             }
             return registers;
         }
@@ -370,14 +385,23 @@ namespace CWDM_Control_Board_GUI
             List<DACRegister> registers = new List<DACRegister>();
             for (int i = 0; i < dac_registers.Length; i++)
             {
-                
                 (string name, ushort output_addr, ushort offset_addr, ushort gain_addr) = dac_registers[i];
-                int output_val = usb_connection.SendReadCommand(output_addr, 1);
-                if (output_val == -5) return null;
-                int offset_val = usb_connection.SendReadCommand(output_addr, 1);
-                if (offset_val == -5) return null;
-                int gain_val = usb_connection.SendReadCommand(output_addr, 1);
-                if (gain_val == -5) return null;
+                int[] values = usb_connection.SendReadCommands(new ushort[]{ output_addr, offset_addr, gain_addr});
+                int output_val;
+                int offset_val;
+                int gain_val;
+                if(values.Length == 1 && values[0] < 0)
+				{
+                    output_val = values[0];
+                    offset_val = values[0];
+                    gain_val = values[0];
+                }
+				else
+				{
+                    output_val = values[0];
+                    offset_val = values[1];
+                    gain_val = values[2];
+                }
                 registers.Add(new DACRegister { Name = name, OutputValue = output_val, OffsetValue = offset_val, GainValue = gain_val });
             }
             return registers;
@@ -386,12 +410,28 @@ namespace CWDM_Control_Board_GUI
         private List<SELRegister> refreshSELRegisters()
         {
             List<SELRegister> registers = new List<SELRegister>();
-            for (int i = 0; i < sel_registers.Length; i++)
+            for (int i = 0; i < sel_registers.Length;)
             {
-                (string name, ushort address) = sel_registers[i];
-                int value = usb_connection.SendReadCommand(address, 1);
-                if (value == -5) return null;
-                registers.Add(new SELRegister { Name = name, RegisterValue = value });
+                int len = sel_registers.Length - i >= 10 ? 10 : sel_registers.Length - i;
+                string[] names = new string[len];
+                ushort[] regAddr = new ushort[len];
+                for (int j = 0; j < len && i + j < sel_registers.Length; j++)
+                {
+                    (names[j], regAddr[j]) = sel_registers[i + j];
+                }
+                int[] values = usb_connection.SendReadCommands(regAddr);
+                for (int j = 0; j < len; j++)
+                {
+                    if (values.Length == 1 && values[0] < 0)
+                    {
+                        registers.Add(new SELRegister { Name = names[j], RegisterValue = values[0] });
+                    }
+                    else
+                    {
+                        registers.Add(new SELRegister { Name = names[j], RegisterValue = values[j] });
+                    }
+                }
+                i += len;
             }
             return registers;
         }
@@ -425,10 +465,8 @@ namespace CWDM_Control_Board_GUI
             if (!usb_connection.Connected)
             {
                 usb_connection.ConnectDevice();
-                //ushort[] regExample = { 0x1000, 0x1001, 0x1002, 0x1003, 0x1004, 0x1005, 0x1006, 0x1007, 0x1008, 0x1009, 0x100A, 0x100B, 0x100C, 0x100D, 0x100E};
-                //byte[] data = usb_connection.ReadDataArray(regExample);
-                //bool tmp = usb_connection.RawWrite(data);
-                //byte[] recieveData = usb_connection.RawRead();
+
+
             }
             else
             {
@@ -438,8 +476,10 @@ namespace CWDM_Control_Board_GUI
             OnPropertyChanged("ConnectionStatus");
             if (usb_connection.Connected)
             {
+                #pragma warning disable CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
 				Task.Run(CheckConnection);
-                ADC_Registers.ItemsSource = await Task.Run(refreshADCRegisters);
+                #pragma warning restore CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
+				ADC_Registers.ItemsSource = await Task.Run(refreshADCRegisters);
                 DAC_Registers.ItemsSource = await Task.Run(refreshDACRegisters);
                 SEL_Registers.ItemsSource = await Task.Run(refreshSELRegisters);
             }

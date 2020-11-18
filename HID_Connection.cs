@@ -14,7 +14,7 @@ namespace CWDM_Control_Board_GUI
         const byte READ_MSG_ID = 0x01;
         const byte READ_INPUT_MSG_ID = 0x03;
         const byte WRITE_MSG_LEN = 0x06;
-        const byte READ_MSG_LEN = 0x06;
+        const byte READ_MSG_LEN = 0x04;
         const int WRITE_COMM_ERROR = -1;
         const int READ_COMM_ERROR = -2;
         const int READ_MISMATCH = -3;
@@ -80,11 +80,18 @@ namespace CWDM_Control_Board_GUI
                 return THREAD_CLOSED_ERROR;
             }
             if (!Connected)
+            {
+                mutex.ReleaseMutex();
                 return CONNECTION_ERROR;
+            }
             byte[] writeData = WriteDataArray(register, val);
             bool writeSuccess = _device.Write(writeData, delay);
             if (!writeSuccess)
+            {
+                mutex.ReleaseMutex();
                 return WRITE_COMM_ERROR;
+
+            }
             byte[] readArray = _device.Read(delay).Data;
             try
             {
@@ -97,11 +104,11 @@ namespace CWDM_Control_Board_GUI
             return 0;
         }
 
-        public bool RawWrite(byte[] data,int delay = 0)
+        private bool RawWrite(byte[] data,int delay = 0)
 		{
             return _device.Write(data, delay);
         }
-        public byte[] RawRead(int delay = 0)
+        private byte[] RawRead(int delay = 0)
 		{
             return  _device.Read(delay).Data;
         }
@@ -117,26 +124,78 @@ namespace CWDM_Control_Board_GUI
                 return THREAD_CLOSED_ERROR;
             }
             if (!Connected)
+            {
+                mutex.ReleaseMutex();
                 return CONNECTION_ERROR;
+            }
             byte[] readCommandData = ReadDataArray(register);
             bool writeSuccess = _device.Write(readCommandData, delay);
             if (!writeSuccess)
+            {
+                mutex.ReleaseMutex();
                 return WRITE_COMM_ERROR;
+            }
             byte[] readArray = _device.Read(delay).Data;
             (bool readStatus, ushort regRead, ushort value) = ReadValue(readArray);
             if (!readStatus)
+			{
+                mutex.ReleaseMutex();
                 return READ_COMM_ERROR;
+			}
             if (regRead != register)
-                return READ_MISMATCH;
-            try
             {
                 mutex.ReleaseMutex();
+                return READ_MISMATCH;
+
             }
-			catch (ObjectDisposedException)
-			{
-                return THREAD_CLOSED_ERROR;
-			}
+            mutex.ReleaseMutex();
             return value;
+        }
+
+        public int[] SendReadCommands(ushort[] registers, int delay = 100)
+        {
+            int len = registers.Length<=10 ? registers.Length : 10;
+            int[] values = new int[len];
+            for(int i = 0; i < values.Length; i++)
+			{
+                values[i] = READ_COMM_ERROR;
+			}
+            try
+            {
+                mutex.WaitOne();
+            }
+            catch (ObjectDisposedException)
+            {
+                return new int[] { THREAD_CLOSED_ERROR };
+            }
+            if (!Connected)
+            {
+                mutex.ReleaseMutex();
+                return new int[] { CONNECTION_ERROR };
+            }
+            byte[] readCommandData = ReadDataArray(registers);
+            bool writeSuccess = _device.Write(readCommandData, delay);
+            if (!writeSuccess)
+            {
+                mutex.ReleaseMutex();
+                return new int[] { WRITE_COMM_ERROR };
+            }
+            byte[] readArray = _device.Read(delay).Data;
+            (bool,ushort,ushort)[] dataValues = ReadValues(readArray,len);
+            for (int i = 0; i < dataValues.Length;i++)
+            {
+                (bool readStatus, ushort regRead, ushort value) = dataValues[i];
+                if (readStatus)
+                {
+                    int idx = Array.IndexOf(registers, regRead);
+                    if (idx == -1)
+                        continue;
+                    values[idx] = value;
+                }
+
+            }
+            mutex.ReleaseMutex();
+            return values;
         }
 
         public byte[] WriteDataArray(ushort register, ushort val)
@@ -158,15 +217,15 @@ namespace CWDM_Control_Board_GUI
                 throw new Exception("Invalid Input Arrays");
 			}
             byte[] writeData = new byte[64];
-            int dataLength = 0x02 + 4 * register.Length;
-            writeData[1] = WRITE_MSG_ID;//Should be 0x04
-            writeData[2] = (byte)dataLength; //Write Message Length
-            for (int i = 0; i < register.Length && i < 0x0F; i++)
+
+            for (int i = 0; i < register.Length && 6*(i+1) < 64; i++)
             {
-                writeData[3 + (i * 4)] = (byte)(register[i]);//last 8 bits
-                writeData[4 + (i * 4)] = (byte)(register[i] >> 8);//first 8 bits
-                writeData[5 + (i * 4)] = (byte)(val[i]);//last 8 bits
-                writeData[6 + (i * 4)] = (byte)(val[i] >> 8);//first 8 bits
+                writeData[1 + (i * 6)] = WRITE_MSG_ID;//Should be 0x04
+                writeData[2 + (i * 6)] =  WRITE_MSG_LEN; //Write Message Length
+                writeData[3 + (i * 6)] = (byte)(register[i]);//last 8 bits
+                writeData[4 + (i * 6)] = (byte)(register[i] >> 8);//first 8 bits
+                writeData[5 + (i * 6)] = (byte)(val[i]);//last 8 bits
+                writeData[6 + (i * 6)] = (byte)(val[i] >> 8);//first 8 bits
             }
             return writeData;
         }
@@ -187,7 +246,7 @@ namespace CWDM_Control_Board_GUI
                 throw new Exception("Invalid Input Arrays");
             }
             byte[] readData = new byte[64];
-            for (int i = 0; i < register.Length && i <= 0x10; i++)
+            for (int i = 0; i < register.Length && 4*(i+1) < 64; i++)
             {
                 readData[1 + (i * 4)] = READ_MSG_ID;//Should be 0x04
                 readData[2 + (i * 4)] = READ_MSG_LEN; //Read Message Length
@@ -210,6 +269,28 @@ namespace CWDM_Control_Board_GUI
                 return (true, reg, val);
             }
             return (false, 0, 0);
+        }
+        public (bool, ushort, ushort)[] ReadValues(byte[] readData,int valsExpected = 10)
+        {
+            (bool, ushort, ushort)[] readValues = new (bool, ushort, ushort)[valsExpected];
+            for(int i = 0; i < valsExpected && 6*(i+1) < 64; i++)
+			{
+                if ((readData[1 + (i * 6)] == READ_INPUT_MSG_ID && readData[2 + (i * 6)] == WRITE_MSG_LEN)||( readData[2 + (i * 6)] == WRITE_MSG_LEN && i == 1))
+                {
+                    ushort startReg = readData[3 + (i * 6)];
+                    ushort endReg = readData[4 + (i * 6)];
+                    ushort reg = (ushort)(startReg + (ushort)(endReg << 8));
+                    ushort startVal = readData[5 + (i * 6)];
+                    ushort endVal = readData[6 + (i * 6)];
+                    ushort val = (ushort)(startVal + (ushort)(endVal << 8));
+                    readValues[i] = (true, reg, val);
+                }
+                else
+                {
+                    readValues[i] = (false, 0, 0);
+                }
+			}
+            return readValues;
         }
     }
 }
