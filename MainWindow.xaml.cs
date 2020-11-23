@@ -656,5 +656,10 @@ namespace CWDM_Control_Board_GUI
             OutputBox.Document.Blocks.Clear();
             boardScriptingLanguage.Run();
 		}
+
+		private void Button_Click(object sender, RoutedEventArgs e)
+		{
+            //Not Implemented Yet
+		}
 	}
 }

@@ -10,6 +10,9 @@ namespace CWDM_Control_Board_GUI
     {
         private int vid;
         private int pid;
+        private bool protected_mode;
+        const byte AUTOTUNE_ID = 0x04;
+        const byte AUTOTUNE_STATUS_ID = 0x05;
         const byte WRITE_MSG_ID = 0x04;
         const byte READ_MSG_ID = 0x01;
         const byte READ_INPUT_MSG_ID = 0x03;
@@ -20,6 +23,7 @@ namespace CWDM_Control_Board_GUI
         const int READ_MISMATCH = -3;
         const int CONNECTION_ERROR = -4;
         const int THREAD_CLOSED_ERROR = -5;
+        const int PROTECTED_MODE_ERROR = -6;
         private static HidDevice _device;
         public bool Connected = false;
         private static Mutex mutex;
@@ -29,6 +33,7 @@ namespace CWDM_Control_Board_GUI
             //Default Constructor with VID and PID values
             vid = 0x1FC9;
             pid = 0x8248;
+            protected_mode = false;
         }
 
         public HID_Connection(int vid,int pid)
@@ -36,6 +41,7 @@ namespace CWDM_Control_Board_GUI
             //If Device VID or PID changes
             this.vid = vid;
             this.pid = pid;
+            protected_mode = false;
         }
         public void ConnectDevice()
         {
@@ -69,8 +75,43 @@ namespace CWDM_Control_Board_GUI
 
             Connected = false;
         }
+
+        public byte[] AutotuneDataArray(ushort test)
+        {
+            byte[] newData = new byte[64];
+            newData[1] = AUTOTUNE_ID;
+            newData[2] = READ_MSG_LEN; //Read Message Length
+            newData[3] = (byte)(test);
+            newData[4] = (byte)(test >> 8);
+            return newData;
+        }
+        public int SendAutotuneCommand(ushort test, int delay = 100)
+        {
+            try
+            {
+                mutex.WaitOne();
+            }
+            catch (ObjectDisposedException)
+            {
+                return THREAD_CLOSED_ERROR;
+            }
+            if (protected_mode)
+            {
+                mutex.ReleaseMutex();
+                return PROTECTED_MODE_ERROR;
+            }
+            protected_mode = true;
+            byte[] writeData = AutotuneDataArray(test);
+            bool writeSuccess = _device.Write(writeData, delay);
+            mutex.ReleaseMutex();
+            if (!writeSuccess) return WRITE_COMM_ERROR;
+            return 0;
+
+
+        }
         public int SendWriteCommand(ushort register, ushort val,int delay = 100)
         {
+            if (protected_mode) return PROTECTED_MODE_ERROR;
             try
             {
                 mutex.WaitOne();
@@ -104,17 +145,11 @@ namespace CWDM_Control_Board_GUI
             return 0;
         }
 
-        private bool RawWrite(byte[] data,int delay = 0)
-		{
-            return _device.Write(data, delay);
-        }
-        private byte[] RawRead(int delay = 0)
-		{
-            return  _device.Read(delay).Data;
-        }
+
 
         public int SendReadCommand(ushort register, int delay = 100)
         {
+            if (protected_mode) return PROTECTED_MODE_ERROR;
             try
             {
                 mutex.WaitOne();
@@ -154,6 +189,7 @@ namespace CWDM_Control_Board_GUI
 
         public int[] SendReadCommands(ushort[] registers, int delay = 100)
         {
+            if(protected_mode) return new int[] { PROTECTED_MODE_ERROR};
             int len = registers.Length<=10 ? registers.Length : 10;
             int[] values = new int[len];
             for(int i = 0; i < values.Length; i++)
@@ -275,7 +311,7 @@ namespace CWDM_Control_Board_GUI
             (bool, ushort, ushort)[] readValues = new (bool, ushort, ushort)[valsExpected];
             for(int i = 0; i < valsExpected && 6*(i+1) < 64; i++)
 			{
-                if ((readData[1 + (i * 6)] == READ_INPUT_MSG_ID && readData[2 + (i * 6)] == WRITE_MSG_LEN)||( readData[2 + (i * 6)] == WRITE_MSG_LEN && i == 1))
+                if ((readData[1 + (i * 6)] == READ_INPUT_MSG_ID && readData[2 + (i * 6)] == WRITE_MSG_LEN))//||( readData[2 + (i * 6)] == WRITE_MSG_LEN && i == 1)
                 {
                     ushort startReg = readData[3 + (i * 6)];
                     ushort endReg = readData[4 + (i * 6)];

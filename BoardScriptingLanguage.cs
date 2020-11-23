@@ -128,7 +128,6 @@ namespace CWDM_Control_Board_GUI
 				line = line.TrimStart(' ');
 				string[] preprocessedLine = Regex.Split(line, @"([(),{}= ])");
 				string[] processedLine = restitchQuotes(preprocessedLine);
-				string inputs = "";
 
 				if (processedLine[0].Equals("if"))
 				{

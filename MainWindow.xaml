@@ -398,6 +398,7 @@
                     </Canvas>
                 </Canvas>
             </Viewbox>
+            <Button Content="Autotune Heaters" HorizontalAlignment="Center"  VerticalAlignment="Bottom" Width="125" Margin="5" Click="Button_Click"/>
 
         </Grid>
 
