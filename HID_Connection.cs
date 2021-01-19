@@ -55,6 +55,7 @@ namespace CWDM_Control_Board_GUI
                 return;
             }
             _device.OpenDevice();
+            bool opened = _device.IsConnected;
             mutex = new Mutex();
             Connected = true;
         }
@@ -216,6 +217,7 @@ namespace CWDM_Control_Board_GUI
                 mutex.ReleaseMutex();
                 return new int[] { WRITE_COMM_ERROR };
             }
+
             byte[] readArray = _device.Read(delay).Data;
             (bool,ushort,ushort)[] dataValues = ReadValues(readArray,len);
             for (int i = 0; i < dataValues.Length;i++)
@@ -268,10 +270,10 @@ namespace CWDM_Control_Board_GUI
         public byte[] ReadDataArray(ushort register)
         {
             byte[] newData = new byte[64];
-            newData[1] = READ_MSG_ID;
-            newData[2] = READ_MSG_LEN; //Read Message Length
-            newData[3] = (byte)(register);
-            newData[4] = (byte)(register >> 8);
+            newData[0] = READ_MSG_ID;
+            newData[1] = READ_MSG_LEN; //Read Message Length
+            newData[2] = (byte)(register);
+            newData[3] = (byte)(register >> 8);
             return newData;
         }
 

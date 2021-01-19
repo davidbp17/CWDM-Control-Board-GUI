@@ -29,18 +29,19 @@ namespace CWDM_Control_Board_GUI
         private const string CONNECT_TO = "Connect";
         private const string DISCONNECT_FROM = "Disconnect";
         public SvgImageSource gfLogo;
+        private BSLOutputBridge outputAdapter;
         private BoardScriptingLanguage boardScriptingLanguage;
         private bool updating = false;
         private const string commentSyntax = "//";
         public bool? ConnectionStatus
-		{
-			get
-			{
+        {
+            get
+            {
                 if (usb_connection == null) return false;
                 return usb_connection.Connected;
-			}
-		}
-        
+            }
+        }
+
 
         public event PropertyChangedEventHandler PropertyChanged;
         private (string, ushort)[] adc_registers = {
@@ -325,7 +326,8 @@ namespace CWDM_Control_Board_GUI
             InitializeComponent();
             usb_connection = new HID_Connection();
             DataContext = this;
-
+            if(OutputBox != null)
+                outputAdapter = new BSLRichTextBoxOutputBridge(OutputBox);
 
 
         }
@@ -359,10 +361,10 @@ namespace CWDM_Control_Board_GUI
                 int len = adc_registers.Length - i >= 10 ? 10 : adc_registers.Length - i;
                 string[] names = new string[len];
                 ushort[] regAddr = new ushort[len];
-                for(int j = 0; j < len && i + j < adc_registers.Length; j++)
-				{
-                    (names[j],regAddr[j]) = adc_registers[i + j];
-				}
+                for (int j = 0; j < len && i + j < adc_registers.Length; j++)
+                {
+                    (names[j], regAddr[j]) = adc_registers[i + j];
+                }
                 int[] values = usb_connection.SendReadCommands(regAddr);
                 for (int j = 0; j < len; j++)
                 {
@@ -386,18 +388,18 @@ namespace CWDM_Control_Board_GUI
             for (int i = 0; i < dac_registers.Length; i++)
             {
                 (string name, ushort output_addr, ushort offset_addr, ushort gain_addr) = dac_registers[i];
-                int[] values = usb_connection.SendReadCommands(new ushort[]{ output_addr, offset_addr, gain_addr});
+                int[] values = usb_connection.SendReadCommands(new ushort[] { output_addr, offset_addr, gain_addr });
                 int output_val;
                 int offset_val;
                 int gain_val;
-                if(values.Length == 1 && values[0] < 0)
-				{
+                if (values.Length == 1 && values[0] < 0)
+                {
                     output_val = values[0];
                     offset_val = values[0];
                     gain_val = values[0];
                 }
-				else
-				{
+                else
+                {
                     output_val = values[0];
                     offset_val = values[1];
                     gain_val = values[2];
@@ -443,7 +445,7 @@ namespace CWDM_Control_Board_GUI
                 if (AutoRefresh.IsChecked.Value && usb_connection.Connected)
                 {
                     ADC_Registers.ItemsSource = await Task.Run(refreshADCRegisters);
-                    
+
                 }
                 else break;
                 if (AutoRefresh.IsChecked.Value && usb_connection.Connected)
@@ -454,7 +456,7 @@ namespace CWDM_Control_Board_GUI
                 if (AutoRefresh.IsChecked.Value && usb_connection.Connected)
                 {
                     SEL_Registers.ItemsSource = await Task.Run(refreshSELRegisters);
-                    
+
                 }
                 else break;
             }
@@ -476,33 +478,33 @@ namespace CWDM_Control_Board_GUI
             OnPropertyChanged("ConnectionStatus");
             if (usb_connection.Connected)
             {
-                #pragma warning disable CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
-				Task.Run(CheckConnection);
-                #pragma warning restore CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
-				ADC_Registers.ItemsSource = await Task.Run(refreshADCRegisters);
+#pragma warning disable CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
+                Task.Run(CheckConnection);
+#pragma warning restore CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
+                ADC_Registers.ItemsSource = await Task.Run(refreshADCRegisters);
                 DAC_Registers.ItemsSource = await Task.Run(refreshDACRegisters);
                 SEL_Registers.ItemsSource = await Task.Run(refreshSELRegisters);
             }
         }
 
         private void CheckConnection()
-		{
+        {
             if (!usb_connection.Connected) return;
-			else
-			{
+            else
+            {
                 while (true) {
                     bool statusUpdate = usb_connection.ConnectionStatus();
                     if (!statusUpdate)
-					{
+                    {
                         usb_connection.Connected = statusUpdate;
                         OnPropertyChanged("ConnectionText");
                         OnPropertyChanged("ConnectionStatus");
                         break;
-					}
+                    }
                     Thread.Sleep(100);
-                   }
-			}
-		}
+                }
+            }
+        }
 
         private async void RefreshButton_Click(object sender, RoutedEventArgs e)
         {
@@ -565,43 +567,33 @@ namespace CWDM_Control_Board_GUI
             CompileButton.IsEnabled = false;
             TextRange textRange = new TextRange(CodeBox.Document.ContentStart, CodeBox.Document.ContentEnd);
             string[] program = textRange.Text.Split(new string[] { "\r\n" }, StringSplitOptions.None);
-            for(int i = 0;i < program.Length;i++)
-			{
+            for (int i = 0; i < program.Length; i++)
+            {
                 string line = program[i];
                 int idx = line.IndexOf("//");
                 if (idx == -1) continue;
                 program[i] = line.Substring(0, idx);
-			}
+            }
             try
             {
-                boardScriptingLanguage = new BoardScriptingLanguage(usb_connection,this, program);
+                boardScriptingLanguage = new BoardScriptingLanguage(usb_connection, outputAdapter, program);
                 RunButton.IsEnabled = true;
-                PrintOutput("Compile Success");
+                outputAdapter.PrintOutput("Compile Success");
             }
-            catch(BoardScriptingLanguage.ProgramException programException)
-			{
-                PrintLineOutput("Compile Failed");
-                PrintLineOutput(programException.Message);
-                PrintLineOutput("Line #" + programException.LineError);
+            catch (BoardScriptingLanguage.ProgramException programException)
+            {
+                outputAdapter.PrintLineOutput("Compile Failed");
+                outputAdapter.PrintLineOutput(programException.Message);
+                outputAdapter.PrintLineOutput("Line #" + programException.LineError);
             }
-            catch(Exception ex)
-			{
-                PrintLineOutput("Program Failed");
-			}
+            catch (Exception ex)
+            {
+                //This will snag if there is a a poorly coded part on my end
+                outputAdapter.PrintLineOutput("Program Failed");
+            }
             CompileButton.IsEnabled = true;
-            
-            
-        }
 
-        public void PrintOutput(string value)
-		{
-            OutputBox.AppendText(value);
-		}
 
-        public void PrintLineOutput(string value)
-        {
-            OutputBox.AppendText(value);
-            OutputBox.AppendText(Environment.NewLine);
         }
 
         private void CodeBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -610,13 +602,13 @@ namespace CWDM_Control_Board_GUI
             updating = true;
             TextPointer textPointer = CodeBox.Document.ContentStart;
             TextPointer startComment = FindWordFromPosition(textPointer, commentSyntax);
-            
+
             while (startComment != null)
             {
                 TextRange text = new TextRange(startComment, CodeBox.Document.ContentEnd);
                 if (text == null) break;
                 string line = text.Text;
-                string substring = line.Substring(0,line.IndexOf("\r\n"));
+                string substring = line.Substring(0, line.IndexOf("\r\n"));
                 TextPointer endComment = startComment.GetPositionAtOffset(substring.Length);
                 TextRange comment = new TextRange(startComment, endComment);
                 comment.ApplyPropertyValue(TextElement.ForegroundProperty, Brushes.Green);
@@ -651,15 +643,40 @@ namespace CWDM_Control_Board_GUI
             return null;
         }
 
-		private void RunButton_Click(object sender, RoutedEventArgs e)
-		{
+        private void RunButton_Click(object sender, RoutedEventArgs e)
+        {
             OutputBox.Document.Blocks.Clear();
             boardScriptingLanguage.Run();
-		}
+        }
 
-		private void Button_Click(object sender, RoutedEventArgs e)
-		{
+        private void Button_Click(object sender, RoutedEventArgs e)
+        {
             //Not Implemented Yet
+        }
+    }
+    public abstract class BSLOutputBridge
+	{
+        public abstract void PrintOutput(string value);
+        public abstract void PrintLineOutput(string value);
+
+    }
+    public class BSLRichTextBoxOutputBridge:BSLOutputBridge{
+        private RichTextBox OutputBox;
+        public BSLRichTextBoxOutputBridge(RichTextBox textBox)
+		{
+            OutputBox = textBox;
 		}
-	}
+        public override void PrintOutput(string value)
+        {
+            OutputBox.AppendText(value);
+        }
+
+        public override void PrintLineOutput(string value)
+        {
+            OutputBox.AppendText(value);
+            OutputBox.AppendText(Environment.NewLine);
+        }
+
+    }
+
 }
