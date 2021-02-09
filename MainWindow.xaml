@@ -9,20 +9,54 @@
         Title="CWDM Control Board GUI" Height="450" Width="800"
         Icon="path132.png"
         >
+    <Window.CommandBindings>
+        <CommandBinding x:Name="PasswordCommand" Executed="PasswordCommand_Executed"/>
+    </Window.CommandBindings>
+
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition />
-            <ColumnDefinition Width="170"/>
+            <ColumnDefinition />
+            <ColumnDefinition Width="180"/>
         </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
             <RowDefinition  />
             <RowDefinition Height="35"/>
         </Grid.RowDefinitions>
-        <Grid Grid.Row="0" Grid.Column="0" Background="FloralWhite">
+        <Grid Grid.Row="0" Grid.Column="0" Background="FloralWhite" Grid.ColumnSpan="2">
 
             <TabControl Name="MainControl" SelectedIndex="1" Grid.Row="0" IsEnabled="{Binding Path=ConnectionStatus}">
-                <TabItem Header="Main Page" IsEnabled="False">
+                <TabItem Name="Autotune_Heaters" Header="Autotune Heaters" IsEnabled="{Binding Path=SuperuserAccess}">
+                    <StackPanel VerticalAlignment="Center">
+                        <UniformGrid Columns="2">
+                            <Label Content="Register" HorizontalAlignment="Right"/>
+                            <ComboBox Width="100" HorizontalAlignment="Left">
+                                <ComboBoxItem Content="Voltage #1"/>
+                                <ComboBoxItem Content="Voltage #2"/>
+                                <ComboBoxItem Content="Voltage #1"/>
+                                <ComboBoxItem Content="Voltage #2"/>
+                                <ComboBoxItem Content="Voltage #3"/>
+                                <ComboBoxItem Content="Voltage #4"/>
+                                <ComboBoxItem Content="Voltage #5"/>
+                                <ComboBoxItem Content="Voltage #6"/>
+                                <ComboBoxItem Content="Voltage #7"/>
+                                <ComboBoxItem Content="Voltage #8"/>
+                            </ComboBox>
+                        </UniformGrid>
+                        <UniformGrid Columns="2">
+                            <Label Content="Register Value" HorizontalAlignment="Right"/>
+                            <Slider Width="100" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                        </UniformGrid>
+                        <UniformGrid Columns="2">
+                            <Label Content="Register Value" HorizontalAlignment="Right"/>
+                            <TextBox Width="100" HorizontalAlignment="Left"  Text="1.0V" VerticalContentAlignment="Center"/>
 
+                        </UniformGrid>
+                        <UniformGrid Columns="2">
+                            <Label Content="Setting" HorizontalAlignment="Right"/>
+                            <CheckBox VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                        </UniformGrid>
+                    </StackPanel>
                 </TabItem>
                 <TabItem Header="Register Map">
                     <Grid>
@@ -38,7 +72,7 @@
                                         <DataGridTemplateColumn Header="Value">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <TextBlock Text="{Binding RegisterValue}">
+                                                    <TextBlock Text="{Binding RegisterString}">
                                                         <TextBlock.ToolTip>
                                                             <ToolTip Content="{Binding ErrorText}"/>
                                                         </TextBlock.ToolTip>
@@ -47,7 +81,7 @@
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
                                     </DataGrid.Columns>
-                                    
+
 
                                 </DataGrid>
                             </TabItem>
@@ -58,7 +92,7 @@
                                         <DataGridTemplateColumn Header="Output Value">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <TextBlock Text="{Binding OutputValue}">
+                                                    <TextBlock Text="{Binding OutputString}">
                                                         <TextBlock.ToolTip>
                                                             <ToolTip Content="{Binding OutputErrorText}"/>
                                                         </TextBlock.ToolTip>
@@ -69,7 +103,7 @@
                                         <DataGridTemplateColumn Header="Offset Value">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <TextBlock Text="{Binding OffsetValue}">
+                                                    <TextBlock Text="{Binding OffsetString}">
                                                         <TextBlock.ToolTip>
                                                             <ToolTip Content="{Binding OffsetErrorText}"/>
                                                         </TextBlock.ToolTip>
@@ -80,7 +114,7 @@
                                         <DataGridTemplateColumn Header="Gain Value">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <TextBlock Text="{Binding GainValue}">
+                                                    <TextBlock Text="{Binding GainString}">
                                                         <TextBlock.ToolTip>
                                                             <ToolTip Content="{Binding GainErrorText}"/>
                                                         </TextBlock.ToolTip>
@@ -89,7 +123,7 @@
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
                                     </DataGrid.Columns>
-                                    
+
                                 </DataGrid>
                             </TabItem>
                             <TabItem Header="Select Signal">
@@ -99,7 +133,7 @@
                                         <DataGridTemplateColumn Header="Value">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <TextBlock Text="{Binding RegisterValue}">
+                                                    <TextBlock Text="{Binding RegisterString}">
                                                         <TextBlock.ToolTip>
                                                             <ToolTip Content="{Binding ErrorText}"/>
                                                         </TextBlock.ToolTip>
@@ -113,10 +147,17 @@
                         </TabControl>
                         <Grid Grid.Row="1">
                             <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="250"/>
+                                <ColumnDefinition />
                                 <ColumnDefinition/>
                                 <ColumnDefinition/>
                             </Grid.ColumnDefinitions>
-                            <Grid Grid.Column="0" HorizontalAlignment="Right">
+                            <UniformGrid Grid.Column="0" Columns="3" Margin="20,0,0,0">
+                                <RadioButton VerticalAlignment="Center" GroupName="BaseData" Content="Binary" Checked="BinaryButton_Checked"/>
+                                <RadioButton VerticalAlignment="Center" GroupName="BaseData" Content="Hex" Checked="HexButton_Checked" IsChecked="True"/>
+                                <RadioButton VerticalAlignment="Center" GroupName="BaseData" Content="Decimal"  Checked="DecimalButton_Checked"/>
+                            </UniformGrid>
+                            <Grid Grid.Column="1" HorizontalAlignment="Center">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition/>
@@ -125,7 +166,8 @@
                                 <Label Content="AutoRefresh" Grid.Column="1" />
 
                             </Grid>
-                            <Button Name="RefreshButton" Grid.Column="1" Width="100" Height="20" VerticalAlignment="Center" Content="Refresh Registers" HorizontalAlignment="Left" Margin="20,2,0,0" Click="RefreshButton_Click"/>
+                            <Button Name="RefreshButton" Grid.Column="2" Width="100" Height="20" VerticalAlignment="Center" Content="Refresh Registers" HorizontalAlignment="Right" Margin="0,2,10,0" Click="RefreshButton_Click" Visibility="{Binding RefreshButtonVisibility}" IsEnabled="{Binding RefreshButtonEnabled}"/>
+                            <ProgressBar Grid.Column="3" Name="ReadProgress" Width="100" Height="15" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="0,2,0,0"/>
                         </Grid>
                     </Grid>
                 </TabItem>
@@ -150,7 +192,7 @@
                             <Button Name="CompileButton" Height="20" Width="80" Content="Compile" HorizontalAlignment="Right" Click="Compile_Click"/>
                             <Button Name="RunButton" Height="20" Width="80" HorizontalAlignment="Left" Content="Run" Click="RunButton_Click" />
                         </UniformGrid>
-                        
+
                     </StackPanel>
                 </TabItem>
                 <TabItem Header="Misc." IsEnabled="False"/>
@@ -158,14 +200,17 @@
 
 
         </Grid>
-        <Grid Grid.Row="0" Grid.Column="1" Background="#FF0F2572">
+        <Grid Grid.Row="0" Grid.Column="2" Background="#FF0F2572">
             <Grid.RowDefinitions>
                 <RowDefinition/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <Grid Grid.Row="1" IsEnabled="{Binding Path=ConnectionStatus}">
                 <Border BorderBrush="Black" BorderThickness="2">
-                    <StackPanel Background="LightBlue">
+                    <StackPanel>
+                        <StackPanel.Background>
+                            <SolidColorBrush Color="{DynamicResource {x:Static SystemColors.GradientInactiveCaptionColorKey}}"/>
+                        </StackPanel.Background>
                         <Label Content="Register Write" HorizontalAlignment="Center"/>
                         <UniformGrid>
                             <Label Content="Reg"/>
@@ -398,11 +443,59 @@
                     </Canvas>
                 </Canvas>
             </Viewbox>
-            <Button Content="Autotune Heaters" HorizontalAlignment="Center"  VerticalAlignment="Bottom" Width="125" Margin="5" Click="Button_Click"/>
-
+            <Grid Height="140" VerticalAlignment="Top" Margin="0,28,0,0" Name="DeviceSettingsGrid" Visibility="{Binding SettingsGridVisibility}" >
+                <Grid.RowDefinitions>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition/>
+                    <ColumnDefinition/>
+                </Grid.ColumnDefinitions>
+                <Label Content="Device HID Settings" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" HorizontalAlignment="Center">
+                    <Label.Foreground>
+                        <SolidColorBrush Color="{DynamicResource {x:Static SystemColors.GradientInactiveCaptionColorKey}}"/>
+                    </Label.Foreground>
+                </Label>
+                <Label Content="VID" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="5,0,5,0" Grid.Row="1" Grid.Column="0">
+                    <Label.Foreground>
+                        <SolidColorBrush Color="{DynamicResource {x:Static SystemColors.GradientInactiveCaptionColorKey}}"/>
+                    </Label.Foreground>
+                </Label>
+                <TextBox Height="22" Width="50" VerticalAlignment="Center" HorizontalAlignment="Left" Name="VID_Textbox" Grid.Row="1" Grid.Column="1"/>
+                <Label Content="PID" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="5,0,5,0" Grid.Row="2" Grid.Column="0">
+                    <Label.Foreground>
+                        <SolidColorBrush Color="{DynamicResource {x:Static SystemColors.GradientInactiveCaptionColorKey}}"/>
+                    </Label.Foreground>
+                </Label>
+                <TextBox Height="22" Width="50" VerticalAlignment="Center" HorizontalAlignment="Left" Name="PID_Textbox" Grid.Row="2" Grid.Column="1"/>
+                <Button Grid.Column="0" Grid.Row="3" Grid.ColumnSpan="2" Width="150" Height="22" VerticalAlignment="Center" Content="Load Default Firmware" Click="LoadDefaultFirmware"/>
+                <Button Grid.Column="0" Grid.Row="4" Grid.ColumnSpan="2" Width="150" Height="22" VerticalAlignment="Center" Content="Load Custom Firmware" Click="LoadCustomFirmware"/>
+            </Grid>
+            <Grid VerticalAlignment="Bottom" Height="100">
+                <Grid.RowDefinitions>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition/>
+                    <ColumnDefinition/>
+                </Grid.ColumnDefinitions>
+                <Label Grid.ColumnSpan="2" Grid.Row="0" Grid.Column="0" Content="Autotune Heaters" HorizontalAlignment="Center"  />
+                <Button Grid.Row="1" Grid.Column="0" Content="Left CH MUX" IsEnabled="False"/>
+                <Button Grid.Row="1" Grid.Column="1" Content="Right CH MUX" IsEnabled="False"/>
+                <Button Grid.Row="2" Grid.Column="0" Content="Left CH DMUX" IsEnabled="False"/>
+                <Button Grid.Row="2" Grid.Column="1" Content="Right CH DMUX" IsEnabled="False"/>
+                <Button Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" Content="Abort" Width="70" IsEnabled="False" />
+            </Grid>
         </Grid>
 
-        <Grid Grid.Row="1" Grid.ColumnSpan="2" >
+        <Grid Grid.Row="1" Grid.ColumnSpan="3" >
             <Button Name="Connection" Content="{Binding Path=ConnectionText}" Width="100" Height="25" VerticalAlignment="Center" Click="Connection_Click"/>
         </Grid>
     </Grid>

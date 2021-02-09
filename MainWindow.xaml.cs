@@ -17,6 +17,7 @@ using System.Windows.Navigation;
 using Windows.UI.Xaml.Media.Imaging;
 using Windows.Storage.Streams;
 using System.IO;
+using Microsoft.Win32;
 
 namespace CWDM_Control_Board_GUI
 {
@@ -26,19 +27,56 @@ namespace CWDM_Control_Board_GUI
     public partial class MainWindow : Window, INotifyPropertyChanged
     {
         private HID_Connection usb_connection;
+        private bool superuserAccess;
         private const string CONNECT_TO = "Connect";
         private const string DISCONNECT_FROM = "Disconnect";
+        private const int BIN_MODE = 1;
+        private const int HEX_MODE = 2;
+        private const int DEC_MODE = 3;
         public SvgImageSource gfLogo;
         private BSLOutputBridge outputAdapter;
         private BoardScriptingLanguage boardScriptingLanguage;
         private bool updating = false;
         private const string commentSyntax = "//";
+        private SuperuserMode passwordWindow;
+        public static RoutedCommand PasswordBoxCommand = new RoutedCommand();
+
+        private string password = "globalfoundries";
         public bool? ConnectionStatus
         {
             get
             {
                 if (usb_connection == null) return false;
                 return usb_connection.Connected;
+            }
+        }
+
+        public bool SuperuserAccess { get { return superuserAccess; } }
+
+        public bool RefreshButtonEnabled
+		{ get;set; }
+
+        public int BaseMode { get; set; }
+
+        public Visibility RefreshButtonVisibility
+		{
+			get
+			{
+                if (RefreshButtonEnabled == true)
+                    return Visibility.Visible;
+                else
+                    return Visibility.Hidden;
+			}
+		}
+
+        public Visibility SettingsGridVisibility
+        {
+            get
+            {
+                if (usb_connection.Connected)
+                    return Visibility.Collapsed;
+                else
+                    return Visibility.Visible;
             }
         }
 
@@ -189,7 +227,31 @@ namespace CWDM_Control_Board_GUI
 
         public class ADCRegister
         {
+
+            //Mode 1 is Binary
+            //Mode 2 is Hex
+            //Mode 3+ is Decimal
+            
+            public int Mode { get; set; }
             public string Name { get; set; }
+            
+            public string RegisterString
+			{
+				get {
+                    if (Mode == 1)
+                    {
+                        string bin = Convert.ToString(RegisterValue, 2);
+                        string leadingZeros = "";
+                        for (int i = bin.Length; i <= 15; i++)
+                            leadingZeros += "0";
+                        return "0b" + leadingZeros+bin;
+                    }
+                    else if (Mode == 2)
+                        return "0x" + RegisterValue.ToString("X4");
+                    else
+                        return RegisterValue.ToString();
+                }
+			}
             public int RegisterValue { get; set; }
             public string ErrorText
             {
@@ -218,7 +280,27 @@ namespace CWDM_Control_Board_GUI
         public class SELRegister
         {
 
+            public int Mode { get; set; }
             public string Name { get; set; }
+
+            public string RegisterString
+            {
+                get
+                {
+                    if (Mode == 1)
+                    {
+                        string bin = Convert.ToString(RegisterValue, 2);
+                        string leadingZeros = "";
+                        for (int i = bin.Length; i <= 15; i++)
+                            leadingZeros += "0";
+                        return "0b" + leadingZeros + bin;
+                    }
+                    else if (Mode == 2)
+                        return "0x" + RegisterValue.ToString("X4");
+                    else
+                        return RegisterValue.ToString();
+                }
+            }
             public int RegisterValue { get; set; }
             public string ErrorText
             {
@@ -246,7 +328,63 @@ namespace CWDM_Control_Board_GUI
         }
         public class DACRegister
         {
+            public int Mode { get; set; }
             public string Name { get; set; }
+            public string OutputString
+            {
+                get
+                {
+                    if (Mode == 1)
+                    {
+                        string bin = Convert.ToString(OutputValue, 2);
+                        string leadingZeros = "";
+                        for (int i = bin.Length; i <= 15; i++)
+                            leadingZeros += "0";
+                        return "0b" + leadingZeros + bin;
+                    }
+                    else if (Mode == 2)
+                        return "0x" + OutputValue.ToString("X4");
+                    else
+                        return OutputValue.ToString();
+                }
+            }
+
+            public string OffsetString
+            {
+                get
+                {
+                    if (Mode == 1)
+                    {
+                        string bin = Convert.ToString(OffsetValue, 2);
+                        string leadingZeros = "";
+                        for (int i = bin.Length; i <= 15; i++)
+                            leadingZeros += "0";
+                        return "0b" + leadingZeros + bin;
+                    }
+                    else if (Mode == 2)
+                        return "0x" + OffsetValue.ToString("X4");
+                    else
+                        return OffsetValue.ToString();
+                }
+            }
+            public string GainString
+            {
+                get
+                {
+                    if (Mode == 1)
+                    {
+                        string bin = Convert.ToString(GainValue, 2);
+                        string leadingZeros = "";
+                        for (int i = bin.Length; i <= 15; i++)
+                            leadingZeros += "0";
+                        return "0b" + leadingZeros + bin;
+                    }
+                    else if (Mode == 2)
+                        return "0x" + GainValue.ToString("X4");
+                    else
+                        return GainValue.ToString();
+                }
+            }
             public int OutputValue { get; set; }
             public int OffsetValue { get; set; }
             public int GainValue { get; set; }
@@ -328,6 +466,14 @@ namespace CWDM_Control_Board_GUI
             DataContext = this;
             if(OutputBox != null)
                 outputAdapter = new BSLRichTextBoxOutputBridge(OutputBox);
+            passwordWindow = null;
+            PasswordBoxCommand.InputGestures.Add(new KeyGesture(Key.W, ModifierKeys.Control));
+            PasswordCommand.Command = PasswordBoxCommand;
+            RefreshButtonEnabled = true;
+            ReadProgress.Maximum = adc_registers.Length + dac_registers.Length + sel_registers.Length;
+            BaseMode = HEX_MODE; //Hex Mode
+            OnPropertyChanged("RefreshButtonEnabled");
+            OnPropertyChanged("RefreshButtonVisibility");
 
 
         }
@@ -370,12 +516,13 @@ namespace CWDM_Control_Board_GUI
                 {
                     if (values.Length == 1 && values[0] < 0)
                     {
-                        registers.Add(new ADCRegister { Name = names[j], RegisterValue = values[0] });
+                        registers.Add(new ADCRegister { Name = names[j], RegisterValue = values[0], Mode = BaseMode }); 
                     }
                     else
                     {
-                        registers.Add(new ADCRegister { Name = names[j], RegisterValue = values[j] });
+                        registers.Add(new ADCRegister { Name = names[j], RegisterValue = values[j], Mode = BaseMode });
                     }
+                    ReadProgress.Dispatcher.Invoke(new Action(() => ReadProgress.Value += 1));
                 }
                 i += len;
             }
@@ -404,7 +551,8 @@ namespace CWDM_Control_Board_GUI
                     offset_val = values[1];
                     gain_val = values[2];
                 }
-                registers.Add(new DACRegister { Name = name, OutputValue = output_val, OffsetValue = offset_val, GainValue = gain_val });
+                registers.Add(new DACRegister { Name = name, OutputValue = output_val, OffsetValue = offset_val, GainValue = gain_val, Mode = BaseMode });
+                ReadProgress.Dispatcher.Invoke(new Action(() => ReadProgress.Value += 1));
             }
             return registers;
         }
@@ -426,12 +574,13 @@ namespace CWDM_Control_Board_GUI
                 {
                     if (values.Length == 1 && values[0] < 0)
                     {
-                        registers.Add(new SELRegister { Name = names[j], RegisterValue = values[0] });
+                        registers.Add(new SELRegister { Name = names[j], RegisterValue = values[0], Mode = BaseMode });
                     }
                     else
                     {
-                        registers.Add(new SELRegister { Name = names[j], RegisterValue = values[j] });
+                        registers.Add(new SELRegister { Name = names[j], RegisterValue = values[j], Mode = BaseMode });
                     }
+                    ReadProgress.Dispatcher.Invoke(new Action(() => ReadProgress.Value += 1));
                 }
                 i += len;
             }
@@ -459,32 +608,83 @@ namespace CWDM_Control_Board_GUI
 
                 }
                 else break;
+                ReadProgress.Dispatcher.Invoke(new Action(() => ReadProgress.Value = 0));
             }
         }
 
         private async void Connection_Click(object sender, RoutedEventArgs e)
         {
-            if (!usb_connection.Connected)
-            {
-                usb_connection.ConnectDevice();
-
-
+            bool currentStatus = usb_connection.Connected;
+            string pidStr = PID_Textbox.Text.ToLower();
+            string vidStr = VID_Textbox.Text.ToLower();
+            if(!currentStatus &&!(vidStr.Equals("") || pidStr.Equals("")))
+			{
+                int vid; int pid;
+                if (pidStr.StartsWith("0x"))
+                {
+                    pidStr = Convert.ToInt32(pidStr, 16).ToString();
+                }
+                if (pidStr.StartsWith("0b"))
+                {
+                    pidStr = Convert.ToInt32(pidStr.Substring(2), 2).ToString();
+                }
+                if (vidStr.StartsWith("0x"))
+                {
+                    vidStr = Convert.ToInt32(vidStr, 16).ToString();
+                }
+                if (vidStr.StartsWith("0b"))
+                {
+                    vidStr = Convert.ToInt32(vidStr.Substring(2), 2).ToString();
+                }
+                if (int.TryParse(pidStr, out pid) && int.TryParse(vidStr, out vid))
+				{
+                    usb_connection = new HID_Connection(vid, pid);
+                }
+                else
+				{
+                    string messageBoxText = $"Unable to parse VID/PID. Use Default Values?\nVID: {HID_Connection.DefaultVIDString()}\nPID: {HID_Connection.DefaultPIDString()}";
+                    string caption = "Parsing Failed!";
+                    MessageBoxButton button = MessageBoxButton.YesNo;
+                    MessageBoxImage icon = MessageBoxImage.Error;
+                    MessageBoxResult result = MessageBox.Show(messageBoxText, caption, button, icon);
+                    if (result == MessageBoxResult.No)
+                    {
+                        //do nothing, no connection attempt
+                        return;
+                    }
+                }
             }
-            else
+            if (currentStatus)
             {
                 usb_connection.DisconnectDevice();
             }
+            else
+            {
+                 usb_connection.ConnectDevice();
+				if (!usb_connection.Connected)
+				{
+                    string messageBoxText = "Unable to connect to selected device.";
+                    string caption = "Connection Failed!";
+                    MessageBoxButton button = MessageBoxButton.OK;
+                    MessageBoxImage icon = MessageBoxImage.Error;
+                    MessageBox.Show(messageBoxText, caption, button, icon);
+                }
+            }
             OnPropertyChanged("ConnectionText");
             OnPropertyChanged("ConnectionStatus");
+            OnPropertyChanged("SettingsGridVisibility");
             if (usb_connection.Connected)
             {
+                
 #pragma warning disable CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
                 Task.Run(CheckConnection);
 #pragma warning restore CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
-                ADC_Registers.ItemsSource = await Task.Run(refreshADCRegisters);
-                DAC_Registers.ItemsSource = await Task.Run(refreshDACRegisters);
-                SEL_Registers.ItemsSource = await Task.Run(refreshSELRegisters);
+                RefreshButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                //ADC_Registers.ItemsSource = await Task.Run(refreshADCRegisters);
+                //DAC_Registers.ItemsSource = await Task.Run(refreshDACRegisters);
+                //SEL_Registers.ItemsSource = await Task.Run(refreshSELRegisters);
             }
+            
         }
 
         private void CheckConnection()
@@ -509,23 +709,28 @@ namespace CWDM_Control_Board_GUI
         private async void RefreshButton_Click(object sender, RoutedEventArgs e)
         {
             if (!usb_connection.Connected) return;
-            RefreshButton.IsEnabled = false;
+            RefreshButtonEnabled = false;
+            OnPropertyChanged("RefreshButtonEnabled");
             ADC_Registers.ItemsSource = await Task.Run(refreshADCRegisters);
             DAC_Registers.ItemsSource = await Task.Run(refreshDACRegisters);
             SEL_Registers.ItemsSource = await Task.Run(refreshSELRegisters);
-            RefreshButton.IsEnabled = true;
+            ReadProgress.Dispatcher.Invoke(new Action(() => ReadProgress.Value = 0));
+            RefreshButtonEnabled = true;
+            OnPropertyChanged("RefreshButtonEnabled");
         }
 
         private void AutoRefresh_Unchecked(object sender, RoutedEventArgs e)
         {
-            RefreshButton.IsEnabled = true;
-            RefreshButton.Visibility = Visibility.Visible;
+            RefreshButtonEnabled = true;
+            OnPropertyChanged("RefreshButtonEnabled");
+            OnPropertyChanged("RefreshButtonVisibility");
         }
 
         private async void AutoRefresh_Checked(object sender, RoutedEventArgs e)
         {
-            RefreshButton.IsEnabled = false;
-            RefreshButton.Visibility = Visibility.Hidden;
+            RefreshButtonEnabled = false;
+            OnPropertyChanged("RefreshButtonEnabled");
+            OnPropertyChanged("RefreshButtonVisibility");
             await AutoRefreshRegisters();
         }
 
@@ -534,8 +739,8 @@ namespace CWDM_Control_Board_GUI
             WriteButton.IsEnabled = false;
             int reg;
             int val;
-            string regText = RegisterBox.Text;
-            string valText = ValueBox.Text;
+            string regText = RegisterBox.Text.ToLower();
+            string valText = ValueBox.Text.ToLower();
             if (regText.StartsWith("0x"))
             {
                 regText = Convert.ToInt32(regText, 16).ToString();
@@ -586,14 +791,33 @@ namespace CWDM_Control_Board_GUI
                 outputAdapter.PrintLineOutput(programException.Message);
                 outputAdapter.PrintLineOutput("Line #" + programException.LineError);
             }
+            /*
             catch (Exception ex)
             {
                 //This will snag if there is a a poorly coded part on my end
                 outputAdapter.PrintLineOutput("Program Failed");
-            }
+            }*/
             CompileButton.IsEnabled = true;
 
 
+        }
+        public void EnteredPassword(string entered_password)
+		{
+            if (password.Equals(entered_password))
+            {
+                if (passwordWindow != null)
+                    passwordWindow.Close();
+                superuserAccess = true;
+                OnPropertyChanged("SuperuserAccess");
+            }
+            else
+            {
+                string messageBoxText = "Entered Invalid Password.";
+                string caption = "Wrong Password!";
+                MessageBoxButton button = MessageBoxButton.OK;
+                MessageBoxImage icon = MessageBoxImage.Error;
+                MessageBox.Show(messageBoxText, caption, button, icon);
+            }
         }
 
         private void CodeBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -653,8 +877,106 @@ namespace CWDM_Control_Board_GUI
         {
             //Not Implemented Yet
         }
+        private void RefreshItemSources()
+		{
+            var adc_regs = ADC_Registers.ItemsSource;
+            if (adc_regs == null) return;
+            List<ADCRegister> reformatedList = new List<ADCRegister>();
+            foreach (var reg in adc_regs)
+            {
+                ADCRegister castRegister = (ADCRegister)reg;
+                castRegister.Mode = BaseMode;
+                reformatedList.Add(castRegister);
+            }
+            ADC_Registers.ItemsSource = reformatedList;
+            var dac_regs = DAC_Registers.ItemsSource;
+            if (dac_regs == null) return;
+            List<DACRegister> reformatedList2 = new List<DACRegister>();
+            foreach (var reg in dac_regs)
+            {
+                DACRegister castRegister = (DACRegister)reg;
+                castRegister.Mode = BaseMode;
+                reformatedList2.Add(castRegister);
+            }
+            DAC_Registers.ItemsSource = reformatedList2;
+            var sel_regs = SEL_Registers.ItemsSource;
+            if (sel_regs == null) return;
+            List<SELRegister> reformatedList3 = new List<SELRegister>();
+            foreach (var reg in sel_regs)
+            {
+                SELRegister castRegister = (SELRegister)reg;
+                castRegister.Mode = BaseMode;
+                reformatedList3.Add(castRegister);
+            }
+            SEL_Registers.ItemsSource = reformatedList3;
+        }
+		private void DecimalButton_Checked(object sender, RoutedEventArgs e)
+		{
+            BaseMode = DEC_MODE;
+            RefreshItemSources();
+
+        }
+        private void BinaryButton_Checked(object sender, RoutedEventArgs e)
+        {
+            BaseMode = BIN_MODE;
+            RefreshItemSources();
+
+        }
+
+        private void HexButton_Checked(object sender, RoutedEventArgs e)
+        {
+            BaseMode = HEX_MODE;
+            RefreshItemSources();
+
+        }
+
+		private void PasswordCommand_Executed(object sender, ExecutedRoutedEventArgs e)
+		{
+            if (!usb_connection.Connected) return;
+            if (superuserAccess)
+            {
+                superuserAccess = false;
+                OnPropertyChanged("SuperuserAccess");
+            }
+            passwordWindow = new SuperuserMode(this);
+            passwordWindow.ShowDialog();
+        }
+
+		private void LoadDefaultFirmware(object sender, RoutedEventArgs e)
+		{
+            #if DEBUG
+            string curDir = Directory.GetCurrentDirectory();
+            string baseDir = Directory.GetParent(Directory.GetParent(curDir).FullName).FullName;
+            System.Diagnostics.Process.Start(baseDir+"\\FirmwareInstall.bat", HID_Connection.DefaultVIDString()+" "+HID_Connection.DefaultUninstalledPIDString() + " \"" + baseDir+"\\cwdm_fw-20210115.bin\"");
+            #else
+            #endif
+        }
+
+        private void LoadCustomFirmware(object sender, RoutedEventArgs e)
+        {
+            #if DEBUG
+            string curDir = Directory.GetCurrentDirectory();
+            string baseDir = Directory.GetParent(Directory.GetParent(curDir).FullName).FullName;
+            string filePath = string.Empty;
+
+            OpenFileDialog openFileDialog = new OpenFileDialog();
+            openFileDialog.InitialDirectory = "c:\\";
+            openFileDialog.Filter = "bin files (*.bin)|*.bin|All files (*.*)|*.*";
+
+			bool? result = openFileDialog.ShowDialog();
+
+            // Process open file dialog box results
+            if (result == true)
+            {
+                // Open document
+                string bin_filename = openFileDialog.FileName;
+                System.Diagnostics.Process.Start(baseDir + "\\FirmwareInstall.bat", HID_Connection.DefaultVIDString() + " " + HID_Connection.DefaultUninstalledPIDString() + " \"" + bin_filename + "\"");
+            }
+            #else
+            #endif
+        }
     }
-    public abstract class BSLOutputBridge
+	public abstract class BSLOutputBridge
 	{
         public abstract void PrintOutput(string value);
         public abstract void PrintLineOutput(string value);

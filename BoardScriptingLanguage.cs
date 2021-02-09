@@ -34,8 +34,8 @@ namespace CWDM_Control_Board_GUI
 		private readonly string whileStat = "while";
 		private readonly string forStat = "for";
 		private List<string> methods = new List<string> { "Read", "Write", "Print","PrintLine", "Delay" };
-		private List<(int, string)> parsedProgram;
-
+		private List<(int, string)> intermediateCode;
+		private bool Compiled { get; set; }
 
 		/*
 		 * Board Scripting Languange class takes in a user inputed program, written in C syntax
@@ -49,6 +49,7 @@ namespace CWDM_Control_Board_GUI
 		{
 			if (tempConnection == null)
 				throw new ArgumentNullException("HID Connection must be instantiated");
+			Compiled = false;
 			connection = tempConnection;
 			outputBridge = bridge;
 			Compile(program);
@@ -77,103 +78,43 @@ namespace CWDM_Control_Board_GUI
 			vars = new Dictionary<string, object>();
 			varStack = new Stack<List<string>>();
 			//This breaks the program lines into a list of tokens to parse that have a corresponding line
-			List<(int, string)> tokens = tokenizeProgram(program);
+			List<(int, string)> tokens = TokenizeProgram(program);
 			//Match all braced statements to ensure closure
 			int errorLine = VerifyClosedProgram(tokens);
 			if (errorLine != -1)
-				outputBridge.PrintLineOutput($"Parsing Error at Line {errorLine}");
+				outputBridge.PrintLineOutput($"Bracket/Parentheses Error at Line {errorLine}");
 			else
 			{
 				//Further parse out line, change loops into goto based syntax
 				//Any errors will end parsing and not return anything
-				parsedProgram = ParseLines(tokens);
+				intermediateCode = LexicalAnalysis(tokens);
 				//Here every line is run regardless of conditional flow
-				RunProgram(parsedProgram, true);
+				RunProgram(intermediateCode, true);
+				Compiled = true;
 			}
 		}
 		public void Run()
 		{
-			if(parsedProgram != null)
-				RunProgram(parsedProgram);
-		}
-
-		//This method takes care of the initial syntactic analysis
-		//Here program lines are split into tokens
-		//The corresponding line number is preserved
-		private List<(int, string)> tokenizeProgram(string[] program)
-		{
-			List<(int, string)> tokenizedProgram = new List<(int, string)>();
-			//Variable tracks original line number
-			int lineNum = 0;
-			foreach (string line in program) {
-				//Parentheses,Commas,Semicolons,Braces and Assignment Operators are split apart
-				//Empty spaces are removed as well
-				
-				string[] processedLine = Regex.Split(line.TrimStart().TrimEnd(), @"([(),;{}=])");
-				//Takes empty strings out of the list
-				processedLine = processedLine.Where(x => !string.IsNullOrEmpty(x)).ToArray();
-				if (processedLine.Length == 0) continue;
-				/*This code checks for valid terminal character
-				 * Rolls out increment and decrement operation
-				 */
-				if (processedLine[processedLine.Length - 1].Contains("}") || processedLine[processedLine.Length - 1].Contains("{") || processedLine[processedLine.Length - 1].Contains(";") || processedLine[processedLine.Length - 1].Contains(",")
-					|| processedLine[0].Contains(ifStat) || processedLine[0].Contains(forStat) || processedLine[0].Contains(whileStat))
-				{ 
-					foreach (string token in processedLine)
-					{
-						if(token.Contains(incr) || token.Contains(decr))
-						{
-							string tokenCopy = token;
-							//Assume its possible that there are multiple incr/decr operations in a given line
-							//Can't vouch this works 100% of the time, but its been fairly tested
-							while(tokenCopy.Contains(incr) || tokenCopy.Contains(decr))
-							{
-								int incrIndex = tokenCopy.IndexOf(incr);
-								int decrIndex = tokenCopy.IndexOf(decr);
-								if((incrIndex < decrIndex || decrIndex == -1) && incrIndex != -1)
-								{
-									tokenizedProgram.Add((lineNum, tokenCopy.Substring(0, incrIndex)));
-									tokenizedProgram.Add((lineNum, tokenCopy.Substring(incrIndex,incr.Length)));
-									tokenCopy = tokenCopy.Substring(incrIndex + incr.Length);
-									continue;
-								}
-								if ((incrIndex > decrIndex || incrIndex == -1) && decrIndex != -1)
-								{
-									tokenizedProgram.Add((lineNum, tokenCopy.Substring(0, decrIndex)));
-									tokenizedProgram.Add((lineNum, tokenCopy.Substring(decrIndex,incr.Length)));
-									tokenCopy = tokenCopy.Substring(decrIndex + decr.Length);
-									continue;
-								}
-							}
-							tokenizedProgram.Add((lineNum, tokenCopy));
-							continue;
-						}
-						
-						if (!token.Equals(""))
-							tokenizedProgram.Add((lineNum, token));
-					}
-					//next line in program
-					lineNum++;
-				}
-				else
-				{
-					throw new ProgramException("Missing Terminating Character",lineNum);
-				}
-
+			// Before running we check for compilation
+			if(Compiled && intermediateCode != null)
+				RunProgram(intermediateCode);
+			else
+			{
+				throw new Exception("Program Not Compiled");
 			}
-			return tokenizedProgram;
 		}
 
 		/* Runs formated lines 
-		 * Compile parameter determines if commands are run or not
-		 * Outputs written to GUI via bridge
-		 * most statement will be passed to evaluate method, which returns the calculation
-		 */
-		public void RunProgram(List<(int, string)> program,bool compile = false)
+		* Compile parameter determines if commands are run or not
+		* The first runthrough is for sytnax checking
+		* Outputs written to GUI via bridge
+		* most statement will be passed to evaluate method, which returns the calculation
+		*/
+		public void RunProgram(List<(int, string)> program, bool compile = false)
 		{
 			varStack.Push(new List<string>());
 			bool breakFlag = false;
-			for (int i = 0;i < program.Count;i++)
+			for (int i = 0; i < program.Count; i++)
 			{
 				(int originalLineNumber, string line) = program[i];
 				line = line.TrimStart(' ');
@@ -196,7 +137,7 @@ namespace CWDM_Control_Board_GUI
 
 						//the post processed line will always look like
 						// if(true) goto 5 else *statement*
-						for(j = 2; j < processedLine.Length; j++)
+						for (j = 2; j < processedLine.Length; j++)
 						{
 							//evalString is the boolean statement to evaluate
 							if (processedLine[j].Equals(")"))
@@ -219,7 +160,7 @@ namespace CWDM_Control_Board_GUI
 						bool evalBool;
 						if (stack.Count == 0)
 						{
-							evalBool = (bool)Evaluate(evalString,originalLineNumber,compile) && !breakFlag;
+							evalBool = (bool)Evaluate(evalString, originalLineNumber, compile) && !breakFlag;
 							if (!evalBool)
 							{
 								//goto statement should be skipped if evaluated false
@@ -256,7 +197,7 @@ namespace CWDM_Control_Board_GUI
 								throw new ProgramException($"Cannot Parse Goto Line: {gotoLine}", originalLineNumber);
 							}
 						} //it can be assumed by runtime that its valid so there is no try/parse line
-						else 
+						else
 							i = Convert.ToInt32(processedLine[2], 10) - 1; //i is the current line number
 					}
 					else //continue or break statement 
@@ -284,7 +225,7 @@ namespace CWDM_Control_Board_GUI
 							}
 						}
 					}
-					if(!processedLine[0].Equals("break"))
+					if (!processedLine[0].Equals("break"))
 					{
 						//break statements dont remove variable here because they are ultimately followed by a goto statement for exiting loop which will land here
 						List<string> remove = varStack.Pop();
@@ -305,13 +246,13 @@ namespace CWDM_Control_Board_GUI
 				else if (processedLine[0].Equals("int[]"))//declaration of int array
 				{
 					List<int> array = new List<int>();
-					if (processedLine[1].Equals("=")) throw new ProgramException("Variable Name Required",originalLineNumber);
+					if (processedLine[1].Equals("=")) throw new ProgramException("Variable Name Required", originalLineNumber);
 					string varName = processedLine[2];
 					//code for declaring new array
-					if(processedLine.Length > 2 && processedLine[4].Equals("=") && processedLine[6].Equals("{"))
+					if (processedLine.Length > 2 && processedLine[4].Equals("=") && processedLine[6].Equals("{"))
 					{
 						bool ended = false;
-						for(int j = 7; j < processedLine.Length; j++)
+						for (int j = 7; j < processedLine.Length; j++)
 						{
 							//currently you cant put statements in the array declaration
 							if (processedLine[j].Equals("}"))
@@ -326,10 +267,10 @@ namespace CWDM_Control_Board_GUI
 							}
 							else
 							{
-								array.Add((int)Evaluate(processedLine[j],originalLineNumber,compile));
+								array.Add((int)Evaluate(processedLine[j], originalLineNumber, compile));
 							}
 						}
-						if (!ended) throw new ProgramException("Array Requires Ending Brace",originalLineNumber);
+						if (!ended) throw new ProgramException("Array Requires Ending Brace", originalLineNumber);
 						else
 						{
 							vars.Add(varName, array.ToArray());
@@ -340,17 +281,17 @@ namespace CWDM_Control_Board_GUI
 					{
 						//This code is for declaring an empty array of a given length
 
-						if(processedLine.Length > 8 && processedLine[4].Equals("=") && processedLine[6].Equals("new") && processedLine[8].Contains("int["))
+						if (processedLine.Length > 8 && processedLine[4].Equals("=") && processedLine[6].Equals("new") && processedLine[8].Contains("int["))
 						{
 							int end = processedLine[8].IndexOf("]");
-							if (end == -1) throw new ProgramException("Invalid Array Syntax",originalLineNumber);
+							if (end == -1) throw new ProgramException("Invalid Array Syntax", originalLineNumber);
 							int arrayLength = (int)Evaluate(processedLine[8].Substring(4, end), originalLineNumber, compile);
 							vars.Add(varName, new int[arrayLength]);
 							varStack.Peek().Add(varName);
 						}
 						else
 						{
-							throw new ProgramException("Invalid Array Syntax",originalLineNumber);
+							throw new ProgramException("Invalid Array Syntax", originalLineNumber);
 						}
 					}
 				}
@@ -358,7 +299,7 @@ namespace CWDM_Control_Board_GUI
 				{
 					//Same code for string arrays, not a useful data type but added in for consistency
 					List<string> array = new List<string>();
-					if (processedLine[2].Equals("=")) throw new ProgramException("Variable Name Required",originalLineNumber);
+					if (processedLine[2].Equals("=")) throw new ProgramException("Variable Name Required", originalLineNumber);
 					string varName = processedLine[2];
 					if (processedLine.Length > 7 && processedLine[4].Equals("=") && processedLine[6].Equals("{"))
 					{
@@ -377,10 +318,10 @@ namespace CWDM_Control_Board_GUI
 							}
 							else
 							{ //string evalutation, fairly straightforward
-								array.Add((string)Evaluate(processedLine[j],originalLineNumber,compile));
+								array.Add((string)Evaluate(processedLine[j], originalLineNumber, compile));
 							}
 						}
-						if (!ended) throw new ProgramException("Array Requires Ending Brace",originalLineNumber);
+						if (!ended) throw new ProgramException("Array Requires Ending Brace", originalLineNumber);
 						else
 						{
 							vars.Add(varName, array.ToArray());
@@ -394,14 +335,14 @@ namespace CWDM_Control_Board_GUI
 							//Code for adding an empty array of strings, c# is dynamic
 							//Exists for uniformity rather than practicality
 							int end = processedLine[8].IndexOf("]");
-							if (end == -1) throw new ProgramException("Invalid Array Syntax",originalLineNumber);
+							if (end == -1) throw new ProgramException("Invalid Array Syntax", originalLineNumber);
 							int arrayLength = (int)Evaluate(processedLine[8].Substring(7, end), originalLineNumber, compile);
 							vars.Add(varName, new string[arrayLength]);
 							varStack.Peek().Add(varName);
 						}
 						else
 						{
-							throw new ProgramException("Invalid Array Syntax",originalLineNumber);
+							throw new ProgramException("Invalid Array Syntax", originalLineNumber);
 						}
 					}
 				}
@@ -410,7 +351,7 @@ namespace CWDM_Control_Board_GUI
 					//Parsing array of doubles or floats
 					//Same kind of code as the int and string array
 					List<double> array = new List<double>();
-					if (processedLine[2].Equals("=")) throw new ProgramException("Variable Name Required",originalLineNumber);
+					if (processedLine[2].Equals("=")) throw new ProgramException("Variable Name Required", originalLineNumber);
 					string varName = processedLine[2];
 					if (processedLine.Length > 8 && processedLine[4].Equals("=") && processedLine[6].Equals("{"))
 					{
@@ -423,16 +364,16 @@ namespace CWDM_Control_Board_GUI
 								ended = true;
 								break;
 							}
-							else if(processedLine[j].Equals(","))
+							else if (processedLine[j].Equals(","))
 							{
 								continue;
 							}
 							else
 							{
-								array.Add((double)Evaluate(processedLine[j],originalLineNumber,compile));
+								array.Add((double)Evaluate(processedLine[j], originalLineNumber, compile));
 							}
 						}
-						if (!ended) throw new ProgramException("Array Requires Ending Brace",originalLineNumber);
+						if (!ended) throw new ProgramException("Array Requires Ending Brace", originalLineNumber);
 						else
 						{
 							vars.Add(varName, array.ToArray());
@@ -445,14 +386,14 @@ namespace CWDM_Control_Board_GUI
 						{
 							//Code for empty array of doubles, all 0.0
 							int end = processedLine[8].IndexOf("]");
-							if (end == -1) throw new ProgramException("Invalid Array Syntax",originalLineNumber);
+							if (end == -1) throw new ProgramException("Invalid Array Syntax", originalLineNumber);
 							int arrayLength = (int)Evaluate(processedLine[8].Substring(7, end), originalLineNumber, compile);
 							vars.Add(varName, new double[arrayLength]);
 							varStack.Peek().Add(varName);
 						}
 						else
 						{
-							throw new ProgramException("Invalid Array Syntax",originalLineNumber);
+							throw new ProgramException("Invalid Array Syntax", originalLineNumber);
 						}
 					}
 				}
@@ -460,7 +401,7 @@ namespace CWDM_Control_Board_GUI
 				{
 					//Code for processing bool array, similar use to the string array
 					List<bool> array = new List<bool>();
-					if (processedLine[2].Equals("=")) throw new ProgramException("Variable Name Required",originalLineNumber);
+					if (processedLine[2].Equals("=")) throw new ProgramException("Variable Name Required", originalLineNumber);
 					string varName = processedLine[2];
 					if (processedLine.Length > 7 && processedLine[4].Equals("=") && processedLine[6].Equals("{"))
 					{
@@ -479,10 +420,10 @@ namespace CWDM_Control_Board_GUI
 							}
 							else
 							{
-								array.Add((bool)Evaluate(processedLine[j],originalLineNumber,compile));
+								array.Add((bool)Evaluate(processedLine[j], originalLineNumber, compile));
 							}
 						}
-						if (!ended) throw new ProgramException("Array Requires Ending Brace",originalLineNumber);
+						if (!ended) throw new ProgramException("Array Requires Ending Brace", originalLineNumber);
 						else
 						{
 							vars.Add(varName, array.ToArray());
@@ -494,7 +435,7 @@ namespace CWDM_Control_Board_GUI
 						if (processedLine.Length > 7 && processedLine[4].Equals("=") && processedLine[6].Equals("new") && processedLine[8].Contains("bool["))
 						{
 							int end = processedLine[8].IndexOf("]");
-							if (end == -1) throw new ProgramException("Invalid Array Syntax",originalLineNumber);
+							if (end == -1) throw new ProgramException("Invalid Array Syntax", originalLineNumber);
 							int arrayLength = (int)Evaluate(processedLine[8].Substring(5, end), originalLineNumber, compile);
 							vars.Add(varName, new bool[arrayLength]);
 							varStack.Peek().Add(varName);
@@ -513,7 +454,7 @@ namespace CWDM_Control_Board_GUI
 						//Cant have lines such as 
 						//int = 35;
 						//Must declare a name for the variable
-						throw new ProgramException("Variable Name Required",originalLineNumber);
+						throw new ProgramException("Variable Name Required", originalLineNumber);
 					}
 					else
 					{
@@ -532,9 +473,10 @@ namespace CWDM_Control_Board_GUI
 								else
 									assignExpr += processedLine[j];
 							}
-							object val = Evaluate(assignExpr,originalLineNumber,compile);
+							object val = Evaluate(assignExpr, originalLineNumber, compile);
 							//here it trims doubles if assigned
-							if (val is int || val is double) { 
+							if (val is int || val is double)
+							{
 								vars.Add(varName, (int)val);
 								varStack.Peek().Add(varName);
 							}
@@ -548,7 +490,7 @@ namespace CWDM_Control_Board_GUI
 							vars.Add(varName, 0);
 							varStack.Peek().Add(varName);
 						}
-					
+
 					}
 				}
 				else if (line.StartsWith("string"))
@@ -559,7 +501,7 @@ namespace CWDM_Control_Board_GUI
 					 */
 					if (processedLine[2].Equals("="))
 					{
-						throw new ProgramException("Variable Name Required",originalLineNumber);
+						throw new ProgramException("Variable Name Required", originalLineNumber);
 					}
 					else
 					{
@@ -577,8 +519,8 @@ namespace CWDM_Control_Board_GUI
 								else
 									assignExpr += processedLine[j];
 							}
-							object val = Evaluate(assignExpr,originalLineNumber,compile);
-							if(val is string)
+							object val = Evaluate(assignExpr, originalLineNumber, compile);
+							if (val is string)
 							{
 								vars.Add(varName, (string)val);
 								varStack.Peek().Add(varName);
@@ -587,7 +529,7 @@ namespace CWDM_Control_Board_GUI
 							{
 								throw new ProgramException("Invalid Data Type for String Assignment", originalLineNumber);
 							}
-								
+
 						}
 						else
 						{
@@ -600,7 +542,7 @@ namespace CWDM_Control_Board_GUI
 				{
 					if (processedLine[2].Equals("="))
 					{
-						throw new ProgramException("Variable Name Required",originalLineNumber);
+						throw new ProgramException("Variable Name Required", originalLineNumber);
 					}
 					else
 					{
@@ -615,8 +557,9 @@ namespace CWDM_Control_Board_GUI
 								else
 									assign += processedLine[j];
 							}
-							object val = Evaluate(assign,originalLineNumber,compile);
-							if (val is int || val is double) { 
+							object val = Evaluate(assign, originalLineNumber, compile);
+							if (val is int || val is double)
+							{
 								vars.Add(varName, (double)val);
 								varStack.Peek().Add(varName);
 							}
@@ -652,7 +595,7 @@ namespace CWDM_Control_Board_GUI
 								else
 									assign += processedLine[j];
 							}
-							object val = Evaluate(assign,originalLineNumber,compile);
+							object val = Evaluate(assign, originalLineNumber, compile);
 							if (val is bool)
 							{
 								vars.Add(varName, (bool)val);
@@ -677,13 +620,14 @@ namespace CWDM_Control_Board_GUI
 					object var;
 					string varName = processedLine[0];
 					//If no assignment takes place, assumed to be function call
-					if (processedLine.Length > 2 && !processedLine[2].Equals("=")){
-						Evaluate(line,originalLineNumber,compile);
+					if (processedLine.Length > 2 && !processedLine[2].Equals("="))
+					{
+						Evaluate(line, originalLineNumber, compile);
 						continue;
 					}
 					//Check if variable has been declared, if not throw error
 					if (!vars.TryGetValue(varName, out var))
-						throw new ProgramException("Variable Does Not Exist",originalLineNumber);
+						throw new ProgramException("Variable Does Not Exist", originalLineNumber);
 					if (processedLine.Length > 4)
 					{
 						string assign = "";
@@ -694,7 +638,7 @@ namespace CWDM_Control_Board_GUI
 							else
 								assign += processedLine[j];
 						}
-						object val = Evaluate(assign,originalLineNumber,compile);
+						object val = Evaluate(assign, originalLineNumber, compile);
 						vars[varName] = val;
 					}
 				}
@@ -702,47 +646,626 @@ namespace CWDM_Control_Board_GUI
 			vars.Clear();
 			varStack.Clear();
 		}
-		/* stitch split strings method is important because string may have elements that would get split apart leading to incomplete string elements
-		 * This method takes the split apart string array and looks for that happening, if it does it sticks the string back and returns a new string array
-		 * 
-		 */
-		private string[] StitchSplitStrings(string[] line)
+
+		//This method takes care of the initial syntactic analysis
+		//Here program lines are split into tokens
+		//The corresponding line number is preserved
+		private List<(int, string)> TokenizeProgram(string[] program)
 		{
-			bool quote = false;
-			string stitch = "";
-			List<string> fixedLine = new List<string>();
-			foreach(string elem in line)
+			List<(int, string)> tokenizedProgram = new List<(int, string)>();
+			//Variable tracks original line number
+			int lineNum = 0;
+			foreach (string line in program)
 			{
-				if (quote)
-				{	//if there is an identified unended quote, it stitches together until an ending quote appears
-					if (elem.EndsWith("\""))
+				//Parentheses,Commas,Semicolons,Braces and Assignment Operators are split apart
+				//Empty spaces are removed as well
+
+				string[] processedLine = Regex.Split(line.TrimStart().TrimEnd(), @"([(),;{}=])");
+				//Takes empty strings out of the list
+				processedLine = processedLine.Where(x => !string.IsNullOrEmpty(x)).ToArray();
+				if (processedLine.Length == 0) continue;
+				/*This code checks for valid terminal character
+				 * Rolls out increment and decrement operation
+				 */
+				if (processedLine[processedLine.Length - 1].Contains("}") || processedLine[processedLine.Length - 1].Contains("{") || processedLine[processedLine.Length - 1].Contains(";") || processedLine[processedLine.Length - 1].Contains(",")
+					|| processedLine[0].Contains(ifStat) || processedLine[0].Contains(forStat) || processedLine[0].Contains(whileStat))
+				{
+					foreach (string token in processedLine)
 					{
-						quote = false;
-						stitch += elem;
-						fixedLine.Add(stitch);
-						stitch = "";
+						if (token.Contains(incr) || token.Contains(decr))
+						{
+							string tokenCopy = token;
+							//Assume its possible that there are multiple incr/decr operations in a given line
+							//Can't vouch this works 100% of the time, but its been fairly tested
+							while (tokenCopy.Contains(incr) || tokenCopy.Contains(decr))
+							{
+								int incrIndex = tokenCopy.IndexOf(incr);
+								int decrIndex = tokenCopy.IndexOf(decr);
+								if ((incrIndex < decrIndex || decrIndex == -1) && incrIndex != -1)
+								{
+									tokenizedProgram.Add((lineNum, tokenCopy.Substring(0, incrIndex)));
+									tokenizedProgram.Add((lineNum, tokenCopy.Substring(incrIndex, incr.Length)));
+									tokenCopy = tokenCopy.Substring(incrIndex + incr.Length);
+									continue;
+								}
+								if ((incrIndex > decrIndex || incrIndex == -1) && decrIndex != -1)
+								{
+									tokenizedProgram.Add((lineNum, tokenCopy.Substring(0, decrIndex)));
+									tokenizedProgram.Add((lineNum, tokenCopy.Substring(decrIndex, incr.Length)));
+									tokenCopy = tokenCopy.Substring(decrIndex + decr.Length);
+									continue;
+								}
+							}
+							tokenizedProgram.Add((lineNum, tokenCopy));
+							continue;
+						}
+
+						if (!token.Equals(""))
+							tokenizedProgram.Add((lineNum, token));
 					}
-					else
-					{
-						stitch += elem;
-					}
+					//next line in program
+					lineNum++;
 				}
 				else
-				{//If the string starts with a " but doesnt have a an ending " we can assume it needs stitching
-					if (elem.StartsWith("\"") && !elem.EndsWith("\""))
+				{
+					throw new ProgramException("Missing Terminating Character", lineNum);
+				}
+
+			}
+			return tokenizedProgram;
+		}
+
+		/* Lexical Analysis is the initial run through of the code
+		* Here loops and conditional statements are decomposed into a more simple routine consisting if(boolean statement) goto line#
+		* All pre/post increment and decrement statements are expanded out in a order consistent with their meaning
+		* This turns the code into all executable statements, the output will be assignments, conditional gotos, function calls
+		* The correct function and variables of the code remain
+		* Recursive method so that loops can be evaluated
+		* 
+		* Takes in the original tokenization list and original line numbers
+		* The starting line number of the code, helps keep track of which line in the program goto statements will flow to
+		* break line number parameter is for when a break statment is implemented
+		* continue statement is the update that normally happens at the end of the loop
+		* breakOriginalLineNum is just tracking the original line number incase of errors
+		*/
+
+		private List<(int, string)> LexicalAnalysis(List<(int, string)> tokens, int startLineNum = 0, int breakLineNum = 0, string continueStatement = "", int breakOriginalLineNum = 0)
+		{
+			//remove empty lines
+
+			tokens = tokens.Where(x => !x.Item2.TrimStart(' ').Equals("")).ToList();
+			List<(int, string)> parsedProgram = new List<(int, string)>();
+			string parsedLine = "";
+			for (int i = 0; i < tokens.Count; i++)
+			{
+				//Queue holds any post increment/decrement as they are added, everytime a line is added, the queue is emptied if there are any post increment statements 
+				Queue<string> incr_decr_lines = new Queue<string>();
+				(int programLine, string elem) = tokens[i];
+				elem = elem.TrimEnd();
+				if (elem.Equals("for"))
+				{
+					//Determines the elongated code for a for loop
+					//Adds a declaration line
+					i++;
+					(programLine, elem) = tokens[i];
+					//start with interpreting the for loop
+					if (!elem.Equals("("))
 					{
-						quote = true;
-						stitch = elem;
+						//if there is no immediate parentheses then sytax is incorrect
+						throw new ProgramException("Error Invalid Syntax: " + programLine);
 					}
 					else
-					{ //otherwise keep the string array the same
-						if(!elem.Equals("") && !elem.Equals(""))
-						fixedLine.Add(elem);
+					{
+						List<(int, string)> declaration = new List<(int, string)>();
+						//parse the initial declaration and add it to its own line
+						while (!elem.Equals(";"))
+						{
+							i++;
+							(programLine, elem) = tokens[i];
+							declaration.Add((programLine, elem));
+							if (elem.Equals(")"))
+							{
+								throw new ProgramException("Error Invalid Syntax", programLine);
+							}
+						}
+						//The declaration is run through parseLines for safety reasons
+						List<(int, string)> forDeclaration = LexicalAnalysis(declaration, startLineNum, breakLineNum);
+						//This the declaration is added to the program
+						foreach ((int blockNum, string blockLine) in forDeclaration)
+						{
+							parsedProgram.Add((blockNum, blockLine));
+							startLineNum++;
+						}
+						//parse the condition statement
+						string ifStatement = "if(";
+						i++;
+						(programLine, elem) = tokens[i];
+						while (!elem.Equals(";"))
+						{
+							ifStatement += elem;
+							i++;
+							(programLine, elem) = tokens[i];
+							if (elem.Equals(")"))
+							{
+								throw new ProgramException("Error Invalid Syntax", programLine);
+							}
+						}
+						//else goto will be the exit out of the for loop
+						ifStatement += ") else goto ";
+						i++;
+						(programLine, elem) = tokens[i];
+						string updateStatement = "";
+						//updateLine will be the usual increment/decrement or adjustment of the declaration/condition variable
+						List<(int, string)> updateCodeBlock = new List<(int, string)>();
+						while (!elem.Equals(")"))
+						{
+							updateCodeBlock.Add((programLine, elem));
+							i++;
+							(programLine, elem) = tokens[i];
+							if (elem.Equals(";"))
+							{
+								throw new ProgramException("Error Invalid Syntax", programLine);
+							}
+						}
+						//add a semicolon so i can run the line through parseLines
+						updateCodeBlock.Add((programLine, ";"));
+						//currently it just takes the first element, this might be updated later
+						updateStatement = LexicalAnalysis(updateCodeBlock, startLineNum, breakLineNum).ToArray()[0].Item2;
+						i++;
+						int forLineNum = programLine;
+						(programLine, elem) = tokens[i];
+						//Main idea here is to put the block into its own list and run it as a subprogram
+						//Therefore if there are other loops within, those get processed correctly
+						//Its important that the correct line numbers are passed
+						List<(int, string)> sublist = new List<(int, string)>();
+						//Two scenerios here, there is block of code or it is a one line for loop
+						if (elem.Equals("{"))
+						{
+							//Stack tracks if block has ended
+							Stack<string> block = new Stack<string>();
+							block.Push(elem);
+							while (block.Count != 0)
+							{
+								//goes through elements
+								i++;
+								(int lineNum, string lineElem) = tokens[i];
+								if (lineElem.Equals("{"))
+								{
+									block.Push(lineElem);
+								}
+								if (lineElem.Equals("}"))
+								{
+									block.Pop();
+								}//adds all elements unless block is empty
+								if (block.Count != 0)
+									sublist.Add((lineNum, lineElem));
+							}
+						}
+						else
+						{
+							//Grabs until nearest endline ;
+							sublist.Add((programLine, elem));
+							do
+							{
+								i++;
+								(programLine, elem) = tokens[i];
+								sublist.Add((programLine, elem));
+							} while (!elem.Equals(";"));
+						}
+						int parsedLineNum = startLineNum;
+						//sublist here is parsed, pass in the update at the end of the for loop and the line it should go back to at end of block
+						//updateLine and forLineNum are passed in in case of continue/break
+						List<(int, string)> parsedSubProgram = LexicalAnalysis(sublist, startLineNum + 1, startLineNum, updateStatement, forLineNum);
+						//Here the statements are added because we know how long the subprogram is now
+						//So exit statements will take to the correct line
+						ifStatement += (startLineNum + parsedSubProgram.Count + 3); //This will be the first line number outside of the loop
+						parsedProgram.Add((forLineNum, ifStatement));
+						startLineNum++;
+						//add all the subprogram
+						foreach ((int blockNum, string blockLine) in parsedSubProgram)
+						{
+							parsedProgram.Add((blockNum, blockLine));
+							startLineNum++;
+						}
+						//updateStatement is added
+						parsedProgram.Add((forLineNum, updateStatement));
+						startLineNum++;
+						//Here we go back to the if statement 
+						parsedProgram.Add((forLineNum, "goto " + parsedLineNum));
+						startLineNum++;
+						parsedLine = "";
+					}
+				}
+				else if (elem.Equals("while"))
+				{
+					//Determines the elongated code for a while loop
+					i++;
+					(programLine, elem) = tokens[i];
+					//start with interpreting the for loop
+					if (elem.Equals("("))
+					{
+						//parse the condition
+
+						string ifStatement = "if(";
+						i++;
+						(programLine, elem) = tokens[i];
+						while (!elem.Equals(")"))
+						{
+							ifStatement += elem;
+							i++;
+							(programLine, elem) = tokens[i];
+						}
+						//if the condition is evaluated to be false it needs to know which line to goto
+						ifStatement += ")else goto ";
+						i++;
+						(programLine, elem) = tokens[i];
+						int whileLineNum = programLine;
+						List<(int, string)> sublist = new List<(int, string)>();
+						//Similar to the for loop, the subprogram gets added to a sublist and then evaluated
+						if (elem.Equals("{"))
+						{
+							Stack<string> block = new Stack<string>();
+							block.Push(elem);
+							while (block.Count != 0)
+							{
+								i++;
+								(int lineNum, string lineElem) = tokens[i];
+								if (lineElem.Equals("{"))
+								{
+									block.Push(lineElem);
+								}
+								if (lineElem.Equals("}"))
+								{
+									block.Pop();
+								}
+								if (block.Count != 0)
+									sublist.Add((lineNum, lineElem));
+							}
+						}
+						else
+						{
+							//for one line while statements
+							sublist.Add((programLine, elem));
+							do
+							{
+								i++;
+								(programLine, elem) = tokens[i];
+								sublist.Add((programLine, elem));
+							} while (!elem.Equals(";"));
+						}
+						int parsedLineNum = startLineNum;
+						//run through, there is no updateLine here
+						List<(int, string)> parsedSubProgram = LexicalAnalysis(sublist, startLineNum + 1, startLineNum);
+						ifStatement += (startLineNum + parsedSubProgram.Count + 2);
+						parsedProgram.Add((whileLineNum, ifStatement));
+						startLineNum++;
+						foreach ((int blockNum, string blockLine) in parsedSubProgram)
+						{
+							parsedProgram.Add((blockNum, blockLine));
+							startLineNum++;
+						}
+						parsedProgram.Add((whileLineNum, "goto " + parsedLineNum));
+						startLineNum++;
+						parsedLine = "";
+					}
+					else if (elem.Equals("}"))
+					{
+						//Can't remember exactly why this condition is here, might be because elem is the final } in some cases
+						//Marking this so it can be changed later
+						continue;
+					}
+					else
+					{
+						throw new ProgramException("Error Invalid Syntax", programLine);
+					}
+				}
+				else if (elem.Equals("if"))
+				{
+					//if statements parsed here
+					i++;
+					(programLine, elem) = tokens[i];
+					if (!elem.Equals("("))
+					{
+						throw new ProgramException("Error Invalid Syntax", programLine);
+					}
+					else
+					{
+						int ifLine = programLine;
+						parsedLine = "if";
+						while (!elem.Equals(")"))
+						{
+							parsedLine += elem;
+							i++;
+							(programLine, elem) = tokens[i];
+						}
+						//make sure if condition is not empty
+						if (parsedLine.Equals("")) throw new ProgramException("Error Invalid Syntax", programLine);
+						parsedLine += ") else goto ";
+						string ifStatement = parsedLine;
+						parsedLine = "";
+						i++;
+						(programLine, elem) = tokens[i];
+						//Similar idea to the for and while loops, you have a subprogram parsed and added in
+						List<(int, string)> sublist = new List<(int, string)>();
+						if (elem.Equals("{"))
+						{
+							Stack<string> block = new Stack<string>();
+							block.Push(elem);
+							while (block.Count != 0)
+							{
+								i++;
+								(int lineNum, string lineElem) = tokens[i];
+								if (lineElem.Equals("{"))
+								{
+									block.Push(lineElem);
+								}
+								if (lineElem.Equals("}"))
+								{
+									block.Pop();
+								}
+								if (block.Count != 0)
+									sublist.Add((lineNum, lineElem));
+							}
+						}
+						else
+						{
+
+							sublist.Add((programLine, elem));
+							do
+							{
+								i++;
+								(programLine, elem) = tokens[i];
+								sublist.Add((programLine, elem));
+							} while (!elem.Equals(";"));
+						}
+						int parsedLineNum = startLineNum;
+						//Parameters are passed back in because you could be in the middle of a loop
+						List<(int, string)> parsedIfSubProgram = LexicalAnalysis(sublist, startLineNum + 1, breakLineNum, continueStatement, breakOriginalLineNum);
+						if (i < tokens.Count - 1)
+						{
+							i++;
+							(programLine, elem) = tokens[i];
+						}
+						else elem = "";
+						//Here the else block is checked and added another sublist
+						if (elem.StartsWith("else"))
+						{
+							elem = elem.Substring(4);
+							elem = elem.TrimStart(' ');
+							if (elem.Equals(""))
+							{
+								i++;
+								(programLine, elem) = tokens[i];
+							}
+							sublist = new List<(int, string)>();
+							if (elem.Equals("{"))
+							{
+								Stack<string> block = new Stack<string>();
+								block.Push(elem);
+								while (block.Count != 0)
+								{
+									i++;
+									(int lineNum, string lineElem) = tokens[i];
+									if (lineElem.Equals("{"))
+									{
+										block.Push(lineElem);
+									}
+									if (lineElem.Equals("}"))
+									{
+										block.Pop();
+									}
+									if (block.Count != 0)
+										sublist.Add((lineNum, lineElem));
+								}
+							}
+							else
+							{
+
+								sublist.Add((programLine, elem));
+								do
+								{
+									i++;
+									(programLine, elem) = tokens[i];
+									sublist.Add((programLine, elem));
+								} while (!elem.Equals(";"));
+							}
+							//The else block gets parsed and put into its own list
+							int parsedLineNum2 = startLineNum;
+							List<(int, string)> parsedElseSubProgram = LexicalAnalysis(sublist, startLineNum + parsedIfSubProgram.Count + 2, breakLineNum, continueStatement, breakOriginalLineNum);
+							ifStatement += (startLineNum + parsedIfSubProgram.Count + 1);
+							parsedProgram.Add((ifLine, ifStatement));
+							startLineNum++;
+							//add in the if block
+							foreach ((int blockNum, string blockLine) in parsedIfSubProgram)
+							{
+								parsedProgram.Add((blockNum, blockLine));
+								startLineNum++;
+							}
+							//we know now how long the else is, so the goto can be configured
+							parsedProgram.Add((ifLine, "goto " + (startLineNum + parsedElseSubProgram.Count + 1)));
+							startLineNum++;
+							foreach ((int blockNum, string blockLine) in parsedElseSubProgram)
+							{
+								parsedProgram.Add((blockNum, blockLine));
+								startLineNum++;
+							}
+							parsedLine = "";
+						} // if there is no else statement then we just add the if block
+						else
+						{
+							//just exits out length of block
+							ifStatement += (startLineNum + parsedIfSubProgram.Count + 1);
+							parsedProgram.Add((ifLine, ifStatement));
+							startLineNum++;
+							foreach ((int blockNum, string blockLine) in parsedIfSubProgram)
+							{
+								parsedProgram.Add((blockNum, blockLine));
+								startLineNum++;
+							}
+							parsedLine = "";
+							//Have to go back an element
+							i--;
+						}
+					}
+				}
+				else if (elem.Equals("break") || elem.Equals("continue"))
+				{
+					//for break or continue statements we can add the correct exit statements
+					if (!continueStatement.Equals("") && elem.Equals("continue"))
+					{
+						//when continue is called we still need to update in for loop
+						parsedProgram.Add((breakOriginalLineNum, continueStatement));
+						startLineNum++;
+					}
+					parsedLine = elem;
+					parsedLine += " goto ";
+					parsedLine += breakLineNum;
+					//go to top of loop and then there will be a break flag to void the condition
+					parsedProgram.Add((programLine, parsedLine));
+					startLineNum++;
+					parsedLine = "";
+				}
+				else
+				{
+					//This part of the code deals with the non-conditional statements
+					//Here is where some early preprocessing is done
+					while (i < tokens.Count - 1 && !elem.Equals(";"))
+					{
+						//expand out pre increment and decrement statements
+						if (elem.Equals("++"))
+						{
+							char nextChar = tokens[i + 1].Item2[0];
+							if (Regex.IsMatch(nextChar.ToString(), "[a-z]", RegexOptions.IgnoreCase))
+							{ //pre increment
+								i++;
+								(programLine, elem) = tokens[i];
+								parsedProgram.Add((programLine, elem + " = " + elem + " + 1"));
+								//These get added before the current line in the order they are declared
+								startLineNum++;
+							}
+						}
+						if (elem.Equals("--"))
+						{ //pre decrement
+							char nextChar = tokens[i + 1].Item2[0];
+							if (Regex.IsMatch(nextChar.ToString(), "[a-z]", RegexOptions.IgnoreCase))
+							{
+								i++;
+								(programLine, elem) = tokens[i];
+								parsedProgram.Add((programLine, elem + " = " + elem + " - 1"));
+								startLineNum++;
+							}
+						}
+
+						
+						while (elem.TrimStart(' ').Equals("")){
+							i++;
+							(programLine, elem) = tokens[i];
+						}
+						char start = elem.TrimStart(' ')[0];
+						//post increment is checked here, looks for variable alongside increment notation
+						if (Regex.IsMatch(start.ToString(), "[a-z]", RegexOptions.IgnoreCase) && i < tokens.Count - 1 && tokens[i + 1].Item2.Equals("++"))
+						{
+							//adds the line to a queue while the current variable is 
+							incr_decr_lines.Enqueue(elem.TrimStart(' ') + " = " + elem.TrimStart(' ') + " + 1");
+							if (!parsedLine.Equals(""))
+								parsedLine += elem;
+							//resume parsing
+							i = i + 2;
+							(programLine, elem) = tokens[i];
+						}
+						else if (Regex.IsMatch(start.ToString(), "[a-z]", RegexOptions.IgnoreCase) && i < tokens.Count - 1 && tokens[i + 1].Item2.Equals("--"))
+						{
+							//post decrement
+							incr_decr_lines.Enqueue(elem.TrimStart(' ') + " = " + elem.TrimStart(' ') + " - 1");
+							if (!parsedLine.Equals(""))
+								parsedLine += elem;
+							i = i + 2;
+							(programLine, elem) = tokens[i];
+						}
+						else
+						{ //generic add element to line
+							parsedLine += elem;
+							i++;
+							(programLine, elem) = tokens[i];
+						}
+						if (!parsedLine.EndsWith(" "))
+						{
+							if (elem.Equals("="))
+							{
+								//Augmented Assignments parsing here, just expands out the line
+								if (parsedLine.EndsWith("+"))
+								{
+									//messing with the whitespace so it is consistent
+									parsedLine = parsedLine.TrimEnd('+').TrimEnd(' ') + " " + elem + " " + parsedLine.TrimEnd('+').TrimEnd(' ') + " + ";
+									i++;
+									(programLine, elem) = tokens[i];
+									continue;
+								}
+								else if (parsedLine.EndsWith("-"))
+								{
+									parsedLine = parsedLine.TrimEnd('-').TrimEnd(' ') + " " + elem + " " + parsedLine.TrimEnd('-').TrimEnd(' ') + " - ";
+									i++;
+									(programLine, elem) = tokens[i];
+									continue;
+								}
+								else if (parsedLine.EndsWith("*"))
+								{
+									parsedLine = parsedLine.TrimEnd('*').TrimEnd(' ') + " " + elem + " " + parsedLine.TrimEnd('*').TrimEnd(' ') + " * ";
+									i++;
+									(programLine, elem) = tokens[i];
+									continue;
+								}
+								else if (parsedLine.EndsWith("/"))
+								{
+									parsedLine = parsedLine.TrimEnd('/').TrimEnd(' ') + " " + elem + " " + parsedLine.TrimEnd('/').TrimEnd(' ') + " / ";
+									i++;
+									(programLine, elem) = tokens[i];
+									continue;
+								}
+								else elem = " " + elem; //adds space as needed
+
+							}
+						}
+						if (parsedLine.EndsWith("="))
+						{// Might be redundant but checks spacing
+							if (!elem.StartsWith(" "))
+							{
+								parsedLine += " ";
+							}
+						}
+						if (elem.StartsWith("0x"))
+						{ //convert hex elements to base 10
+							elem = Convert.ToInt32(elem, 16).ToString();
+						}
+						if (elem.StartsWith("0b"))
+						{ //convert binary elements to base 10
+							elem = Convert.ToInt32(elem.Substring(2), 2).ToString();
+						}
+
+					}
+					if (!parsedLine.Equals(""))
+					{
+						//add the line
+						parsedProgram.Add((programLine, parsedLine));
+						startLineNum++;
+						parsedLine = "";
+					}
+					while (incr_decr_lines.Count != 0)
+					{
+						//add all post increments
+						parsedProgram.Add((programLine, incr_decr_lines.Dequeue()));
+						startLineNum++;
 					}
 				}
 			}
-			return fixedLine.ToArray();
+			//return the parsed out program
+			return parsedProgram;
 		}
+
+
+
+
+
 
 		/* Evaluate is an important method because it evaluates all arithmetic and calls methods
 		 * It is inheriently recursive as content in parentheses needs to be evaluated to maintain order of operations
@@ -1205,6 +1728,51 @@ namespace CWDM_Control_Board_GUI
 			string[] processedLine = StitchSplitStrings(Regex.Split(result, @"([ ])"));
 			return new List<string>(processedLine).Where(x => !x.Equals(" ")).ToList(); 
 		}
+
+
+		/* stitch split strings method is important because string may have elements that would get split apart leading to incomplete string elements
+ * This method takes the split apart string array and looks for that happening, if it does it sticks the string back and returns a new string array
+ * 
+ */
+		private string[] StitchSplitStrings(string[] line)
+		{
+			bool quote = false;
+			string stitch = "";
+			List<string> fixedLine = new List<string>();
+			foreach (string elem in line)
+			{
+				if (quote)
+				{   //if there is an identified unended quote, it stitches together until an ending quote appears
+					if (elem.EndsWith("\""))
+					{
+						quote = false;
+						stitch += elem;
+						fixedLine.Add(stitch);
+						stitch = "";
+					}
+					else
+					{
+						stitch += elem;
+					}
+				}
+				else
+				{//If the string starts with a " but doesnt have a an ending " we can assume it needs stitching
+					if (elem.StartsWith("\"") && !elem.EndsWith("\""))
+					{
+						quote = true;
+						stitch = elem;
+					}
+					else
+					{ //otherwise keep the string array the same
+						if (!elem.Equals("") && !elem.Equals(""))
+							fixedLine.Add(elem);
+					}
+				}
+			}
+			return fixedLine.ToArray();
+		}
+
+
 		/* Helper method for prefixConversion
 		 * Returns true if the string is one of the approved operators
 		 */
@@ -1279,538 +1847,8 @@ namespace CWDM_Control_Board_GUI
 			outputBridge.PrintLineOutput(printText);
 			foreach (object state in printStatements) outputBridge.PrintLineOutput(state.ToString());
 		}
-		/* Parse Lines is the initial run through of the code
-		 * Here loops and conditional statements are decomposed into a more simple routine consisting if(boolean statement) goto line#
-		 * All pre/post increment and decrement statements are expanded out in a order consistent with their meaning
-		 * This turns the code into all executable statements, the output will be assignments, conditional gotos, function calls
-		 * The correct function and variables of the code remain
-		 * Recursive method so that loops can be evaluated
-		 * 
-		 * Takes in the original tokenization list and original line numbers
-		 * The starting line number of the code, helps keep track of which line in the program goto statements will flow to
-		 * break line number parameter is for when a break statment is implemented
-		 * continue statement is the update that normally happens at the end of the loop
-		 * breakOriginalLineNum is just tracking the original line number incase of errors
-		 */
-		private List<(int, string)> ParseLines(List<(int, string)> tokens, int startLineNum = 0, int breakLineNum = 0, string continueStatement = "", int breakOriginalLineNum = 0)
-		{
-			//remove empty lines
 
-			tokens = tokens.Where(x => !x.Item2.Equals("")).ToList();
-			List<(int, string)> parsedProgram = new List<(int, string)>();
-			string parsedLine = "";
-			for (int i = 0; i < tokens.Count; i++)
-			{
-				//Queue holds any post increment/decrement as they are added, everytime a line is added, the queue is emptied if there are any post increment statements 
-				Queue<string> incr_decr_lines = new Queue<string>();
-				(int programLine, string elem) = tokens[i];
-				elem = elem.TrimEnd();
-				if (elem.Equals("for"))
-				{
-					//Determines the elongated code for a for loop
-					//Adds a declaration line
-					i++;
-					(programLine, elem) = tokens[i];
-					//start with interpreting the for loop
-					if (!elem.Equals("("))
-					{
-						//if there is no immediate parentheses then sytax is incorrect
-						throw new ProgramException("Error Invalid Syntax: " + programLine);
-					}
-					else{
-						List<(int, string)> declaration = new List<(int, string)>();
-						//parse the initial declaration and add it to its own line
-						while (!elem.Equals(";"))
-						{
-							i++;
-							(programLine, elem) = tokens[i];
-							declaration.Add((programLine, elem));
-							if (elem.Equals(")"))
-							{
-								throw new ProgramException("Error Invalid Syntax", programLine);
-							}
-						}
-						//The declaration is run through parseLines for safety reasons
-						List<(int, string)> forDeclaration = ParseLines( declaration, startLineNum, breakLineNum);
-						//This the declaration is added to the program
-						foreach ((int blockNum, string blockLine) in forDeclaration)
-						{
-							parsedProgram.Add((blockNum, blockLine));
-							startLineNum++;
-						}
-						//parse the condition statement
-						string ifStatement = "if(";
-						i++;
-						(programLine, elem) = tokens[i];
-						while (!elem.Equals(";"))
-						{
-							ifStatement += elem;
-							i++;
-							(programLine, elem) = tokens[i];
-							if (elem.Equals(")"))
-							{
-								throw new ProgramException("Error Invalid Syntax", programLine);
-							}
-						}
-						//else goto will be the exit out of the for loop
-						ifStatement += ") else goto ";
-						i++;
-						(programLine, elem) = tokens[i];
-						string updateStatement = "";
-						//updateLine will be the usual increment/decrement or adjustment of the declaration/condition variable
-						List<(int, string)> updateCodeBlock = new List<(int, string)>();
-						while (!elem.Equals(")"))
-						{
-							updateCodeBlock.Add((programLine, elem));
-							i++;
-							(programLine, elem) = tokens[i];
-							if (elem.Equals(";"))
-							{
-								throw new ProgramException("Error Invalid Syntax" , programLine);
-							}
-						}
-						//add a semicolon so i can run the line through parseLines
-						updateCodeBlock.Add((programLine, ";"));
-						//currently it just takes the first element, this might be updated later
-						updateStatement = ParseLines(updateCodeBlock, startLineNum, breakLineNum).ToArray()[0].Item2;
-						i++;
-						int forLineNum = programLine;
-						(programLine, elem) = tokens[i];
-						//Main idea here is to put the block into its own list and run it as a subprogram
-						//Therefore if there are other loops within, those get processed correctly
-						//Its important that the correct line numbers are passed
-						List<(int, string)>  sublist = new List<(int, string)>();
-						//Two scenerios here, there is block of code or it is a one line for loop
-						if (elem.Equals("{"))
-						{
-							//Stack tracks if block has ended
-							Stack<string> block = new Stack<string>();
-							block.Push(elem);
-							while (block.Count != 0)
-							{
-								//goes through elements
-								i++;
-								(int lineNum, string lineElem) = tokens[i];
-								if (lineElem.Equals("{"))
-								{
-									block.Push(lineElem);
-								}
-								if (lineElem.Equals("}"))
-								{
-									block.Pop();
-								}//adds all elements unless block is empty
-								if (block.Count != 0)
-									sublist.Add((lineNum, lineElem));
-							}
-						}
-						else
-						{
-							//Grabs until nearest endline ;
-							sublist.Add((programLine, elem));
-							do
-							{
-								i++;
-								(programLine, elem) = tokens[i];
-								sublist.Add((programLine, elem));
-							} while (!elem.Equals(";"));
-						}
-						int parsedLineNum = startLineNum;
-						//sublist here is parsed, pass in the update at the end of the for loop and the line it should go back to at end of block
-						//updateLine and forLineNum are passed in in case of continue/break
-						List<(int, string)> parsedSubProgram = ParseLines(sublist,startLineNum+1,startLineNum,updateStatement,forLineNum);
-						//Here the statements are added because we know how long the subprogram is now
-						//So exit statements will take to the correct line
-						ifStatement += (startLineNum + parsedSubProgram.Count+3); //This will be the first line number outside of the loop
-						parsedProgram.Add((forLineNum, ifStatement));
-						startLineNum++;
-						//add all the subprogram
-						foreach ((int blockNum, string blockLine) in parsedSubProgram)
-						{
-							parsedProgram.Add((blockNum, blockLine));
-							startLineNum++;
-						}
-						//updateStatement is added
-						parsedProgram.Add((forLineNum, updateStatement));
-						startLineNum++;
-						//Here we go back to the if statement 
-						parsedProgram.Add((forLineNum, "goto " + parsedLineNum));
-						startLineNum++;
-						parsedLine = "";
-					}
-				}
-				else if(elem.Equals("while"))
-				{
-					//Determines the elongated code for a while loop
-					i++;
-					(programLine, elem) = tokens[i];
-					//start with interpreting the for loop
-					if (elem.Equals("("))
-					{
-						//parse the condition
-						
-						string ifStatement = "if(";
-						i++;
-						(programLine, elem) = tokens[i];
-						while (!elem.Equals(")"))
-						{
-							ifStatement += elem;
-							i++;
-							(programLine, elem) = tokens[i];
-						}
-						//if the condition is evaluated to be false it needs to know which line to goto
-						ifStatement += ")else goto ";
-						i++;
-						(programLine, elem) = tokens[i];
-						int whileLineNum = programLine;
-						List<(int, string)> sublist = new List<(int, string)>();
-						//Similar to the for loop, the subprogram gets added to a sublist and then evaluated
-						if (elem.Equals("{"))
-						{
-							Stack<string> block = new Stack<string>();
-							block.Push(elem);
-							while (block.Count != 0)
-							{
-								i++;
-								(int lineNum, string lineElem) = tokens[i];
-								if (lineElem.Equals("{"))
-								{
-									block.Push(lineElem);
-								}
-								if (lineElem.Equals("}"))
-								{
-									block.Pop();
-								}
-								if (block.Count != 0)
-									sublist.Add((lineNum, lineElem));
-							}
-						}
-						else
-						{
-							//for one line while statements
-							sublist.Add((programLine, elem));
-							do
-							{
-								i++;
-								(programLine, elem) = tokens[i];
-								sublist.Add((programLine, elem));
-							} while (!elem.Equals(";"));
-						}
-						int parsedLineNum = startLineNum;
-						//run through, there is no updateLine here
-						List<(int, string)> parsedSubProgram = ParseLines(sublist, startLineNum + 1, startLineNum);
-						ifStatement += (startLineNum + parsedSubProgram.Count + 2);
-						parsedProgram.Add((whileLineNum, ifStatement));
-						startLineNum++;
-						foreach ((int blockNum, string blockLine) in parsedSubProgram)
-						{
-							parsedProgram.Add((blockNum, blockLine));
-							startLineNum++;
-						}
-						parsedProgram.Add((whileLineNum, "goto " + parsedLineNum));
-						startLineNum++;
-						parsedLine = "";
-					}
-					else if (elem.Equals("}"))
-					{
-						//Can't remember exactly why this condition is here, might be because elem is the final } in some cases
-						//Marking this so it can be changed later
-						continue;
-					}
-					else
-					{
-						throw new ProgramException("Error Invalid Syntax", programLine);
-					}
-				}
-				else if(elem.Equals("if"))
-				{
-					//if statements parsed here
-					i++;
-					(programLine, elem) = tokens[i];
-					if (!elem.Equals("("))
-					{
-						throw new ProgramException("Error Invalid Syntax", programLine);
-					}
-					else{
-						int ifLine = programLine;
-						parsedLine = "if";
-						while (!elem.Equals(")"))
-						{
-							parsedLine += elem;
-							i++;
-							(programLine, elem) = tokens[i];
-						}
-						//make sure if condition is not empty
-						if (parsedLine.Equals("")) throw new ProgramException("Error Invalid Syntax", programLine);
-						parsedLine += ") else goto ";
-						string ifStatement = parsedLine;
-						parsedLine = "";
-						i++;
-						(programLine, elem) = tokens[i];
-						//Similar idea to the for and while loops, you have a subprogram parsed and added in
-						List<(int, string)> sublist = new List<(int, string)>();
-						if(elem.Equals("{"))
-						{ 
-							Stack<string> block = new Stack<string>();
-							block.Push(elem);
-							while (block.Count != 0)
-							{
-								i++;
-								(int lineNum, string lineElem) = tokens[i];
-								if (lineElem.Equals("{"))
-								{
-									block.Push(lineElem);
-								}
-								if (lineElem.Equals("}"))
-								{
-									block.Pop();
-								}
-								if (block.Count != 0)
-									sublist.Add((lineNum, lineElem));
-							}
-						}
-						else
-						{
 
-							sublist.Add((programLine, elem));
-							do
-							{
-								i++;
-								(programLine, elem) = tokens[i];
-								sublist.Add((programLine, elem));
-							} while (!elem.Equals(";"));
-						}
-						int parsedLineNum = startLineNum;
-						//Parameters are passed back in because you could be in the middle of a loop
-						List<(int, string)> parsedIfSubProgram = ParseLines(sublist, startLineNum + 1, breakLineNum,continueStatement,breakOriginalLineNum);
-						if (i < tokens.Count-1)
-						{
-							i++;
-							(programLine, elem) = tokens[i];
-						}
-						else elem = "";
-						//Here the else block is checked and added another sublist
-						if (elem.Equals("else"))
-						{
-							i++;
-							(programLine, elem) = tokens[i];
-							sublist = new List<(int, string)>();
-							if (elem.Equals("{"))
-							{
-								Stack<string> block = new Stack<string>();
-								block.Push(elem);
-								while (block.Count != 0)
-								{
-									i++;
-									(int lineNum, string lineElem) = tokens[i];
-									if (lineElem.Equals("{"))
-									{
-										block.Push(lineElem);
-									}
-									if (lineElem.Equals("}"))
-									{
-										block.Pop();
-									}
-									if (block.Count != 0)
-										sublist.Add((lineNum, lineElem));
-								}
-							}
-							else
-							{
-
-								sublist.Add((programLine, elem));
-								do
-								{
-									i++;
-									(programLine, elem) = tokens[i];
-									sublist.Add((programLine, elem));
-								} while (!elem.Equals(";"));
-							}
-							//The else block gets parsed and put into its own list
-							int parsedLineNum2 = startLineNum;
-							List<(int, string)> parsedElseSubProgram = ParseLines(sublist, startLineNum+parsedIfSubProgram.Count+2, breakLineNum,continueStatement,breakOriginalLineNum);
-							ifStatement += (startLineNum + parsedIfSubProgram.Count+1);
-							parsedProgram.Add((ifLine, ifStatement));
-							startLineNum++;
-							//add in the if block
-							foreach ((int blockNum, string blockLine) in parsedIfSubProgram)
-							{
-								parsedProgram.Add((blockNum, blockLine));
-								startLineNum++;
-							}
-							//we know now how long the else is, so the goto can be configured
-							parsedProgram.Add((ifLine, "goto " + (startLineNum + parsedElseSubProgram.Count+2)));
-							startLineNum++;
-							foreach ((int blockNum, string blockLine) in parsedElseSubProgram)
-							{
-								parsedProgram.Add((blockNum, blockLine));
-								startLineNum++;
-							}
-							parsedLine = "";
-						} // if there is no else statement then we just add the if block
-						else
-						{
-							//just exits out length of block
-							ifStatement += (startLineNum + parsedIfSubProgram.Count+1);
-							parsedProgram.Add((ifLine, ifStatement));
-							startLineNum++;
-							foreach ((int blockNum, string blockLine) in parsedIfSubProgram)
-							{
-								parsedProgram.Add((blockNum, blockLine));
-								startLineNum++;
-							}
-							parsedLine = "";
-							//Have to go back an element
-							i--;
-						}
-					}
-				}
-				else if (elem.Equals("break")  || elem.Equals("continue"))
-				{
-					//for break or continue statements we can add the correct exit statements
-					if (!continueStatement.Equals("") && elem.Equals("continue"))
-					{
-						//when continue is called we still need to update in for loop
-						parsedProgram.Add((breakOriginalLineNum, continueStatement));
-						startLineNum++;
-					}
-					parsedLine = elem;
-					parsedLine += " goto ";
-					parsedLine += breakLineNum;
-					//go to top of loop and then there will be a break flag to void the condition
-					parsedProgram.Add((programLine, parsedLine));
-					startLineNum++;
-					parsedLine = "";
-				}
-				else
-				{
-					//This part of the code deals with the non-conditional statements
-					//Here is where some early preprocessing is done
-					while (i < tokens.Count-1 && !elem.Equals(";"))
-					{
-						//expand out pre increment and decrement statements
-						if (elem.Equals("++"))
-						{
-							char nextChar = tokens[i + 1].Item2[0];
-							if (Regex.IsMatch(nextChar.ToString(), "[a-z]", RegexOptions.IgnoreCase))
-							{ //pre increment
-								i++;
-								(programLine, elem) = tokens[i];
-								parsedProgram.Add((programLine, elem + " = " + elem + " + 1"));
-								//These get added before the current line in the order they are declared
-								startLineNum++;
-							}
-						}
-						if (elem.Equals("--"))
-						{ //pre decrement
-							char nextChar = tokens[i + 1].Item2[0];
-							if (Regex.IsMatch(nextChar.ToString(), "[a-z]", RegexOptions.IgnoreCase))
-							{
-								i++;
-								(programLine, elem) = tokens[i];
-								parsedProgram.Add((programLine, elem + " = " + elem + " - 1"));
-								startLineNum++;
-							}
-						}
-						
-						char start = elem.TrimStart(' ')[0];
-						//post increment is checked here, looks for variable alongside increment notation
-						if (Regex.IsMatch(start.ToString(), "[a-z]", RegexOptions.IgnoreCase) && i < tokens.Count - 1 && tokens[i + 1].Item2.Equals("++"))
-						{
-							//adds the line to a queue while the current variable is 
-							incr_decr_lines.Enqueue(elem.TrimStart(' ') + " = " + elem.TrimStart(' ') + " + 1");
-							if(!parsedLine.Equals(""))
-								parsedLine += elem;
-							//resume parsing
-							i = i+2;
-							(programLine, elem) = tokens[i];
-						}
-						else if (Regex.IsMatch(start.ToString(), "[a-z]", RegexOptions.IgnoreCase) && i < tokens.Count - 1 && tokens[i + 1].Item2.Equals("--"))
-						{
-							//post decrement
-							incr_decr_lines.Enqueue(elem.TrimStart(' ') + " = " + elem.TrimStart(' ') + " - 1");
-							if (!parsedLine.Equals(""))
-								parsedLine += elem;
-							i = i + 2;
-							(programLine, elem) = tokens[i];
-						}
-						else
-						{ //generic add element to line
-							parsedLine += elem;
-							i++;
-							(programLine, elem) = tokens[i];
-						}
-						if (!parsedLine.EndsWith(" "))
-						{
-							if (elem.Equals("="))
-							{
-								//Augmented Assignments parsing here, just expands out the line
-								if (parsedLine.EndsWith("+"))
-								{
-									//messing with the whitespace so it is consistent
-									parsedLine = parsedLine.TrimEnd('+').TrimEnd(' ') + " " + elem + " " + parsedLine.TrimEnd('+').TrimEnd(' ') + " + ";
-									i++;
-									(programLine, elem) = tokens[i];
-									continue;
-								}
-								else if (parsedLine.EndsWith("-"))
-								{
-									parsedLine = parsedLine.TrimEnd('-').TrimEnd(' ') + " " + elem + " " + parsedLine.TrimEnd('-').TrimEnd(' ') + " - ";
-									i++;
-									(programLine, elem) = tokens[i];
-									continue;
-								}
-								else if (parsedLine.EndsWith("*"))
-								{
-									parsedLine = parsedLine.TrimEnd('*').TrimEnd(' ') + " " + elem + " " + parsedLine.TrimEnd('*').TrimEnd(' ') + " * ";
-									i++;
-									(programLine, elem) = tokens[i];
-									continue;
-								}
-								else if (parsedLine.EndsWith("/"))
-								{
-									parsedLine = parsedLine.TrimEnd('/').TrimEnd(' ') + " " + elem + " " + parsedLine.TrimEnd('/').TrimEnd(' ') + " / ";
-									i++;
-									(programLine, elem) = tokens[i];
-									continue;
-								}
-								else elem = " " + elem; //adds space as needed
-								
-							}
-						}
-						if(parsedLine.EndsWith("="))
-						{// Might be redundant but checks spacing
-							if(!elem.StartsWith(" "))
-							{
-								parsedLine += " ";
-							}
-						}
-						if (elem.StartsWith("0x"))
-						{ //convert hex elements to base 10
-							elem = Convert.ToInt32(elem,16).ToString();
-						}
-						if (elem.StartsWith("0b"))
-						{ //convert binary elements to base 10
-							elem = Convert.ToInt32(elem.Substring(2), 2).ToString();
-						}
-						
-					}
-					if (!parsedLine.Equals("")) { 
-						//add the line
-						parsedProgram.Add((programLine, parsedLine));
-						startLineNum++;
-						parsedLine = "";
-					}
-					while(incr_decr_lines.Count != 0)
-					{
-						//add all post increments
-						parsedProgram.Add((programLine, incr_decr_lines.Dequeue()));
-						startLineNum++;
-					}
-				}
-			}
-			//return the parsed out program
-			return parsedProgram;
-		}
 
 		private int VerifyClosedProgram(List<(int,string)> tokens)
 		{
@@ -1867,489 +1905,6 @@ namespace CWDM_Control_Board_GUI
 
 
 	}
-	/* Math Operation handles all the operations
-	 * they are static methods so that no reference to the class is needed
-	 */
-	public class MathOperations
-	{
 
-		/*
-		 * Custom Exception for Invalid Operations
-		 * Contains the two values being operated on
-		 */
-		public class OperationException : Exception
-		{
-			public object value1 { get; set; }
-			public object value2 { get; set; }
-			public OperationException() : base() { }
-			public OperationException(string message) : base(message) { }
-			public OperationException(string message, object val1 = null, object val2 = null) : this(message)
-			{
-				value1 = val1;
-				value2 = val2;
-			}
-		}
-		//Checks if values are equal, not the objects themselves
-		public static object EqualsCondition(object a, object b)
-		{
-			if (a is int)
-			{
-				if (b is int)
-				{
-					return (int)a == (int)b;
-				}
-				else if (b is double)
-				{
-					return (int)a == (double)b;
-				}
-				else
-				{
-					return a != b;
-				}
-			}
-			else if (a is double)
-			{
-				if (b is int)
-				{
-					return (double)a == (int)b;
-				}
-				else if (b is double)
-				{
-					return (double)a == (double)b;
-				}
-				else
-				{
-					return a != b;
-				}
-			}
-			else if (a is string)
-			{
-				if (b is string)
-				{
-					return ((string)a).Equals((string)b);
-				}
-				else
-					return a == b;
-			}
-			else if (a is bool)
-			{
-				if (b is bool)
-				{
-					return ((bool)a) == (bool)b;
-				}
-				else
-					return a == b;
-			}
-			else
-				return a == b;
-		}
-		public static object NotEqualsCondition(object a, object b)
-		{ /*Original Code, but its redundant since we have the equals method
-		   * 
-			if (a is int)
-			{
-				if (b is int)
-				{
-					return (int)a != (int)b;
-				}
-				else if (b is double)
-				{
-					return (int)a != (double)b;
-				}
-				else
-				{
-					return a != b;
-				}
-			}
-			else if (a is double)
-			{
-				if (b is int)
-				{
-					return (double)a != (int)b;
-				}
-				else if (b is double)
-				{
-					return (double)a != (double)b;
-				}
-				else
-				{
-					return a != b;
-				}
-			}
-			else if (a is string)
-			{
-				if (b is string)
-				{
-					return !((string)a).Equals((string)b);
-				}
-				else
-					return a != b;
-			}
-			else if (a is bool)
-			{
-				if (b is bool)
-				{
-					return ((bool)a) != (bool)b;
-				}
-				else
-					return a != b;
-			}
-			else
-				return a != b;
-			*/
-			return !(bool)EqualsCondition(a, b);
-		}
-		//Greater than is a numeric comparision
-		//Therefore datatypes doesnt need to be the same
-		public static object GreaterThan(object a, object b)
-		{
-			if (a is int)
-			{
-				if (b is int)
-				{
-					return (int)a > (int)b;
-				}
-				else if (b is double)
-				{
-					return (int)a > (double)b;
-				}
-				else
-				{
-					throw new OperationException("Numeric Type Required For Greater Than Comparision", a, b);
-				}
-			}
-			else if (a is double)
-			{
-				if (b is int)
-				{
-					return (double)a > (int)b;
-				}
-				else if (b is double)
-				{
-					return (double)a > (double)b;
-				}
-				else
-				{
-					throw new OperationException("Numeric Type Required For Greater Than Comparision", a, b);
-				}
-			}
-			else
-			{
-				throw new OperationException("Numeric Type Required For Greater Than Comparision", a, b);
-			}
-		}
-		//The code for greater than or equals is almost exactly the same as greater than
-		public static object GreaterThanOrEquals(object a, object b)
-		{
-			if (a is int)
-			{
-				if (b is int)
-				{
-					return (int)a >= (int)b;
-				}
-				else if (b is double)
-				{
-					return (int)a >= (double)b;
-				}
-				else
-				{
-					throw new OperationException("Numeric Type Required For Greater Than Or Equals Comparision", a, b);
-				}
-			}
-			else if (a is double)
-			{
-				if (b is int)
-				{
-					return (double)a >= (int)b;
-				}
-				else if (b is double)
-				{
-					return (double)a >= (double)b;
-				}
-				else
-				{
-					throw new OperationException("Numeric Type Required For Greater Than or Equals Comparision", a, b);
-				}
-			}
-			else
-			{
-				throw new OperationException("Numeric Type Required For Greater Than or Equals Comparision", a, b);
-			}
-		}
-		//Less than is also the same kind of method as Greater than, just < instead of >
-		public static object LessThan(object a, object b)
-		{
-			if (a is int)
-			{
-				if (b is int)
-				{
-					return (int)a < (int)b;
-				}
-				else if (b is double)
-				{
-					return (int)a < (double)b;
-				}
-				else
-				{
-					throw new OperationException("Numeric Type Required For Less Than Comparision", a, b);
-				}
-			}
-			else if (a is double)
-			{
-				if (b is int)
-				{
-					return (double)a < (int)b;
-				}
-				else if (b is double)
-				{
-					return (double)a < (double)b;
-				}
-				else
-				{
-					throw new OperationException("Numeric Type Required For Less Than Comparision", a, b);
-				}
-			}
-			else
-			{
-				throw new OperationException("Numeric Type Required For Less Than Comparision", a, b);
-			}
-		}
-
-		public static object LessThanOrEquals(object a, object b)
-		{
-			if (a is int)
-			{
-				if (b is int)
-				{
-					return (int)a <= (int)b;
-				}
-				else if (b is double)
-				{
-					return (int)a <= (double)b;
-				}
-				else
-				{
-					throw new OperationException("Numeric Type Required For Less Than Or Equals Comparision", a, b);
-				}
-			}
-			else if (a is double)
-			{
-				if (b is int)
-				{
-					return (double)a <= (int)b;
-				}
-				else if (b is double)
-				{
-					return (double)a <= (double)b;
-				}
-				else
-				{
-					throw new OperationException("Numeric Type Required For Less Than or Equals Comparision", a, b);
-				}
-			}
-			else
-			{
-				throw new OperationException("Numeric Type Required For Less Than or Equals Comparision", a, b);
-			}
-		}
-
-		//Add is mostly for addition of numeric types
-		//But also it allows for concatenation of strings with other datatypes
-		public static object add(object a, object b)
-		{
-			if (a is string || b is string)
-			{
-				return a.ToString() + b.ToString();
-			}
-			else if (a is int)
-			{
-				if (b is int)
-				{
-					return (int)a + (int)b;
-				}
-				else if (b is double)
-				{
-					return (int)a + (double)b;
-				}
-				else
-				{
-					throw new OperationException("Numeric or String Type Required For Addition", a, b);
-				}
-			}
-			else if (a is double)
-			{
-				if (b is int)
-				{
-					return (double)a + (int)b;
-				}
-				else if (b is double)
-				{
-					return (double)a + (double)b;
-				}
-				else
-				{
-					throw new OperationException("Numeric or String Type Required For Addition", a, b);
-				}
-			}
-			else
-			{
-				throw new Exception("Numeric or String Type Required For Addition");
-			}
-		}
-		//Subtraction is similar to additon, but there is no support for strings
-		public static object subtract(object a, object b)
-		{
-			if (a is int)
-			{
-				if (b is int)
-				{
-					return (int)a - (int)b;
-				}
-				else if (b is double)
-				{
-					return (int)a - (double)b;
-				}
-				else
-				{
-					throw new OperationException("Numeric Type Required For Subtraction", a, b);
-				}
-			}
-			else if (a is double)
-			{
-				if (b is int)
-				{
-					return (double)a - (int)b;
-				}
-				else if (b is double)
-				{
-					return (double)a - (double)b;
-				}
-				else
-				{
-					throw new Exception("Numeric Type Required For Subtraction");
-				}
-			}
-			else
-			{
-				throw new Exception("Numeric Type Required For Subtraction");
-			}
-		}
-		//multiply method for numeric types only, uses the same rules for multiplication as c#
-		public static object multiply(object a, object b)
-		{
-			if (a is int)
-			{
-				if (b is int)
-				{
-					return (int)a * (int)b;
-				}
-				else if (b is double)
-				{
-					return (int)a * (double)b;
-				}
-				else
-				{
-					throw new OperationException("Numeric Type Required For Multiplication", a, b);
-				}
-			}
-			else if (a is double)
-			{
-				if (b is int)
-				{
-					return (double)a * (int)b;
-				}
-				else if (b is double)
-				{
-					return (double)a * (double)b;
-				}
-				else
-				{
-					throw new OperationException("Numeric Type Required For Multiplication", a, b);
-				}
-			}
-			else
-			{
-				throw new OperationException("Numeric Type Required For Multiplication", a, b);
-			}
-		}
-		//divide method for numeric types only, uses the same rules for multiplication as c#
-		public static object divide(object a, object b)
-		{
-			if (a is int)
-			{
-				if (b is int)
-				{
-					return (int)a / (int)b;
-				}
-				else if (b is double)
-				{
-					return (int)a / (double)b;
-				}
-				else
-				{
-					throw new OperationException("Numeric Type Required For Division", a, b);
-				}
-			}
-			else if (a is double)
-			{
-				if (b is int)
-				{
-					return (double)a / (int)b;
-				}
-				else if (b is double)
-				{
-					return (double)a / (double)b;
-				}
-				else
-				{
-					throw new OperationException("Numeric Type Required For Division", a, b);
-				}
-			}
-			else
-			{
-				throw new OperationException("Numeric Type Required For Division", a, b);
-			}
-		}
-		//Power methods are almost never brought into languages, but rather extensions of a math class
-		//Since I am coding this using a programming language, well i can use their method
-		//Again for numeric types only
-		public static object power(object a, object b)
-		{
-			if (a is int)
-			{
-				if (b is int)
-				{
-					return Math.Pow((int)a, (int)b);
-				}
-				else if (b is double)
-				{
-					return Math.Pow((int)a, (double)b);
-				}
-				else
-				{
-					throw new OperationException("Numeric Type Required For Exponential Operation", a, b);
-				}
-			}
-			else if (a is double)
-			{
-				if (b is int)
-				{
-					return Math.Pow((double)a, (int)b);
-				}
-				else if (b is double)
-				{
-					return Math.Pow((double)a, (double)b);
-				}
-				else
-				{
-					throw new OperationException("Numeric Type Required For Exponential Operation", a, b);
-				}
-			}
-			else
-			{
-				throw new OperationException("Numeric Type Required For Exponential Operation", a, b);
-			}
-		}
-	}
 	
 }

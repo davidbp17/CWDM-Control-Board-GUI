@@ -10,6 +10,9 @@ namespace CWDM_Control_Board_GUI
     {
         private int vid;
         private int pid;
+        private const int default_vid = 0x1FC9;
+        private const int default_pid = 0x8248;
+        private const int default_uninstalled_pid = 0x0130;
         private bool protected_mode;
         const byte AUTOTUNE_ID = 0x04;
         const byte AUTOTUNE_STATUS_ID = 0x05;
@@ -31,8 +34,8 @@ namespace CWDM_Control_Board_GUI
         public HID_Connection()
         {
             //Default Constructor with VID and PID values
-            vid = 0x1FC9;
-            pid = 0x8248;
+            vid = default_vid;
+            pid = default_pid;
             protected_mode = false;
         }
 
@@ -42,6 +45,27 @@ namespace CWDM_Control_Board_GUI
             this.vid = vid;
             this.pid = pid;
             protected_mode = false;
+        }
+        public static int DefaultVID()
+		{
+            return default_vid;
+        }
+        public static int DefaultPID()
+        {
+            return default_pid;
+        }
+
+        public static string DefaultVIDString()
+        {
+            return "0x" + default_vid.ToString("X4");
+        }
+        public static string DefaultPIDString()
+        {
+            return "0x" + default_pid.ToString("X4"); 
+        }
+        public static string DefaultUninstalledPIDString()
+        {
+            return "0x" + default_uninstalled_pid.ToString("X4");
         }
         public void ConnectDevice()
         {
@@ -63,9 +87,17 @@ namespace CWDM_Control_Board_GUI
         public bool ConnectionStatus()
 		{
             if (!Connected) return false;
-            mutex.WaitOne();
-			bool tmpStatus = _device.IsConnected;
-            mutex.ReleaseMutex();
+            bool tmpStatus = false;
+            try
+            {
+                mutex.WaitOne();
+                tmpStatus = _device.IsConnected;
+                mutex.ReleaseMutex();
+            }
+            catch(ObjectDisposedException ex)
+			{
+                return false;
+			}
             return tmpStatus;
 		}
 
@@ -207,14 +239,28 @@ namespace CWDM_Control_Board_GUI
             }
             if (!Connected)
             {
-                mutex.ReleaseMutex();
+                try
+                {
+                    mutex.ReleaseMutex();
+                }
+                catch(System.ObjectDisposedException ex)
+				{
+                    return new int[] { CONNECTION_ERROR };
+                }
                 return new int[] { CONNECTION_ERROR };
             }
             byte[] readCommandData = ReadDataArray(registers);
             bool writeSuccess = _device.Write(readCommandData, delay);
             if (!writeSuccess)
             {
-                mutex.ReleaseMutex();
+                try
+                {
+                    mutex.ReleaseMutex();
+                }
+                catch(ObjectDisposedException ex)
+				{
+                    return new int[] { THREAD_CLOSED_ERROR };
+                }
                 return new int[] { WRITE_COMM_ERROR };
             }
 
@@ -232,7 +278,14 @@ namespace CWDM_Control_Board_GUI
                 }
 
             }
-            mutex.ReleaseMutex();
+            try
+            {
+                mutex.ReleaseMutex();
+            }
+            catch (ObjectDisposedException ex)
+            {
+                return new int[] { THREAD_CLOSED_ERROR };
+            }
             return values;
         }
 
