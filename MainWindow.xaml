@@ -27,35 +27,56 @@
 
             <TabControl Name="MainControl" SelectedIndex="1" Grid.Row="0" IsEnabled="{Binding Path=ConnectionStatus}">
                 <TabItem Name="Autotune_Heaters" Header="Autotune Heaters" IsEnabled="{Binding Path=SuperuserAccess}">
-                    <StackPanel VerticalAlignment="Center">
-                        <UniformGrid Columns="2">
-                            <Label Content="Register" HorizontalAlignment="Right"/>
-                            <ComboBox Width="100" HorizontalAlignment="Left">
-                                <ComboBoxItem Content="Voltage #1"/>
-                                <ComboBoxItem Content="Voltage #2"/>
-                                <ComboBoxItem Content="Voltage #1"/>
-                                <ComboBoxItem Content="Voltage #2"/>
-                                <ComboBoxItem Content="Voltage #3"/>
-                                <ComboBoxItem Content="Voltage #4"/>
-                                <ComboBoxItem Content="Voltage #5"/>
-                                <ComboBoxItem Content="Voltage #6"/>
-                                <ComboBoxItem Content="Voltage #7"/>
-                                <ComboBoxItem Content="Voltage #8"/>
-                            </ComboBox>
-                        </UniformGrid>
-                        <UniformGrid Columns="2">
-                            <Label Content="Register Value" HorizontalAlignment="Right"/>
-                            <Slider Width="100" HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                        </UniformGrid>
-                        <UniformGrid Columns="2">
-                            <Label Content="Register Value" HorizontalAlignment="Right"/>
-                            <TextBox Width="100" HorizontalAlignment="Left"  Text="1.0V" VerticalContentAlignment="Center"/>
-
-                        </UniformGrid>
-                        <UniformGrid Columns="2">
-                            <Label Content="Setting" HorizontalAlignment="Right"/>
-                            <CheckBox VerticalAlignment="Center" HorizontalAlignment="Left"/>
-                        </UniformGrid>
+                    <StackPanel VerticalAlignment="Bottom">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="300"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Button Content="MUX Left Channel" Name="MUX_Left" Width="140" Margin="5" Grid.Column="0" HorizontalAlignment="Right" Click="AutotuneMUXLeft"/>
+                            <Ellipse Width="12" Height="12" Name="MUX_LeftGreen" Grid.Column="1" Fill="Gray" VerticalAlignment="Center" HorizontalAlignment="Left" Stroke="Gray" Margin="2"/>
+                            <Ellipse Width="12" Height="12" Name="MUX_LeftOrange" Grid.Column="2" Fill="Gray" VerticalAlignment="Center" HorizontalAlignment="Left" Stroke="Gray" Margin="2"/>
+                            <Ellipse Width="12" Height="12" Name="MUX_LeftRed" Grid.Column="3" Fill="Gray" VerticalAlignment="Center" HorizontalAlignment="Left" Stroke="Gray" Margin="2"/>
+                        </Grid>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="300"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Button Content="MUX Right Channel" Name="MUX_Right" Width="140" Margin="5" Grid.Column="0" HorizontalAlignment="Right" Click="AutotuneMUXRight"/>
+                            <Ellipse Width="12" Height="12" Name="MUX_RightGreen" Grid.Column="1" Fill="Gray" VerticalAlignment="Center" HorizontalAlignment="Left" Stroke="Gray" Margin="2"/>
+                            <Ellipse Width="12" Height="12" Name="MUX_RightOrange" Grid.Column="2" Fill="Gray" VerticalAlignment="Center" HorizontalAlignment="Left" Stroke="Gray" Margin="2"/>
+                            <Ellipse Width="12" Height="12" Name="MUX_RightRed" Grid.Column="3" Fill="Gray" VerticalAlignment="Center" HorizontalAlignment="Left" Stroke="Gray" Margin="2"/>
+                        </Grid>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="300"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Button Content="DMUX Left Channel" Width="140" Margin="5" Grid.Column="0" HorizontalAlignment="Right" Click="AutotuneDMUXLeft"/>
+                            <Ellipse Width="12" Height="12" Name="DMUX_LeftGreen" Grid.Column="1" Fill="Gray" VerticalAlignment="Center" HorizontalAlignment="Left" Stroke="Gray" Margin="2"/>
+                            <Ellipse Width="12" Height="12" Name="DMUX_LeftOrange" Grid.Column="2" Fill="Gray" VerticalAlignment="Center" HorizontalAlignment="Left" Stroke="Gray" Margin="2"/>
+                            <Ellipse Width="12" Height="12" Name="DMUX_LeftRed" Grid.Column="3" Fill="Gray" VerticalAlignment="Center" HorizontalAlignment="Left" Stroke="Gray" Margin="2"/>
+                        </Grid>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="300"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Button Content="DMUX Right Channel" Width="140" Margin="5" Grid.Column="0" HorizontalAlignment="Right" Click="AutotuneDMUXRight"/>
+                            <Ellipse Width="12" Height="12" Name="DMUX_RightGreen" Grid.Column="1" Fill="Gray" VerticalAlignment="Center" HorizontalAlignment="Left" Stroke="Gray" Margin="2"/>
+                            <Ellipse Width="12" Height="12" Name="DMUX_RightOrange" Grid.Column="2" Fill="Gray" VerticalAlignment="Center" HorizontalAlignment="Left" Stroke="Gray" Margin="2"/>
+                            <Ellipse Width="12" Height="12" Name="DMUX_RightRed" Grid.Column="3" Fill="Gray" VerticalAlignment="Center" HorizontalAlignment="Left" Stroke="Gray" Margin="2"/>
+                        </Grid>
+                        <Button Content="Abort" Width="100" Margin="0,100,0,10" Click="Abort"/>
                     </StackPanel>
                 </TabItem>
                 <TabItem Header="Register Map">
@@ -475,24 +496,7 @@
                 <Button Grid.Column="0" Grid.Row="3" Grid.ColumnSpan="2" Width="150" Height="22" VerticalAlignment="Center" Content="Load Default Firmware" Click="LoadDefaultFirmware"/>
                 <Button Grid.Column="0" Grid.Row="4" Grid.ColumnSpan="2" Width="150" Height="22" VerticalAlignment="Center" Content="Load Custom Firmware" Click="LoadCustomFirmware"/>
             </Grid>
-            <Grid VerticalAlignment="Bottom" Height="100">
-                <Grid.RowDefinitions>
-                    <RowDefinition/>
-                    <RowDefinition/>
-                    <RowDefinition/>
-                    <RowDefinition/>
-                </Grid.RowDefinitions>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition/>
-                    <ColumnDefinition/>
-                </Grid.ColumnDefinitions>
-                <Label Grid.ColumnSpan="2" Grid.Row="0" Grid.Column="0" Content="Autotune Heaters" HorizontalAlignment="Center"  />
-                <Button Grid.Row="1" Grid.Column="0" Content="Left CH MUX" IsEnabled="False"/>
-                <Button Grid.Row="1" Grid.Column="1" Content="Right CH MUX" IsEnabled="False"/>
-                <Button Grid.Row="2" Grid.Column="0" Content="Left CH DMUX" IsEnabled="False"/>
-                <Button Grid.Row="2" Grid.Column="1" Content="Right CH DMUX" IsEnabled="False"/>
-                <Button Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" Content="Abort" Width="70" IsEnabled="False" />
-            </Grid>
+
         </Grid>
 
         <Grid Grid.Row="1" Grid.ColumnSpan="3" >

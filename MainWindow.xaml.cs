@@ -40,14 +40,19 @@ namespace CWDM_Control_Board_GUI
         private const string commentSyntax = "//";
         private SuperuserMode passwordWindow;
         public static RoutedCommand PasswordBoxCommand = new RoutedCommand();
-
         private string password = "globalfoundries";
+        private SolidColorBrush greenBrush;
+        private SolidColorBrush orangeBrush;
+        private SolidColorBrush redBrush;
+        private SolidColorBrush grayBrush;
+        private int curAutotuneTest;
+        private bool abortFlag = false;
         public bool? ConnectionStatus
         {
             get
             {
                 if (usb_connection == null) return false;
-                return usb_connection.Connected;
+                return connectionStatus;
             }
         }
 
@@ -58,6 +63,7 @@ namespace CWDM_Control_Board_GUI
 
         public int BaseMode { get; set; }
 
+        bool connectionStatus => usb_connection.Connected;
         public Visibility RefreshButtonVisibility
 		{
 			get
@@ -73,7 +79,7 @@ namespace CWDM_Control_Board_GUI
         {
             get
             {
-                if (usb_connection.Connected)
+                if (connectionStatus)
                     return Visibility.Collapsed;
                 else
                     return Visibility.Visible;
@@ -464,6 +470,15 @@ namespace CWDM_Control_Board_GUI
             InitializeComponent();
             usb_connection = new HID_Connection();
             DataContext = this;
+            superuserAccess = true;
+            greenBrush = new SolidColorBrush();
+            orangeBrush = new SolidColorBrush();
+            redBrush = new SolidColorBrush();
+            grayBrush = new SolidColorBrush();
+            greenBrush.Color = Color.FromRgb(50, 200, 0);
+            orangeBrush.Color = Color.FromRgb(255, 165, 0);
+            redBrush.Color = Color.FromRgb(255, 0, 0);
+            grayBrush.Color = Color.FromRgb(128, 128, 128);
             if(OutputBox != null)
                 outputAdapter = new BSLRichTextBoxOutputBridge(OutputBox);
             passwordWindow = null;
@@ -493,7 +508,7 @@ namespace CWDM_Control_Board_GUI
                 if (usb_connection == null)
                     return CONNECT_TO;
                 else
-                    if (!usb_connection.Connected)
+                    if (!connectionStatus)
                     return CONNECT_TO;
                 return DISCONNECT_FROM;
             }
@@ -529,6 +544,7 @@ namespace CWDM_Control_Board_GUI
             return registers;
         }
 
+
         private List<DACRegister> refreshDACRegisters()
         {
             List<DACRegister> registers = new List<DACRegister>();
@@ -556,6 +572,7 @@ namespace CWDM_Control_Board_GUI
             }
             return registers;
         }
+
 
         private List<SELRegister> refreshSELRegisters()
         {
@@ -587,22 +604,24 @@ namespace CWDM_Control_Board_GUI
             return registers;
         }
 
+   
+
         private async Task AutoRefreshRegisters()
         {
             while (true)
             {
-                if (AutoRefresh.IsChecked.Value && usb_connection.Connected)
+                if (AutoRefresh.IsChecked.Value && connectionStatus)
                 {
                     ADC_Registers.ItemsSource = await Task.Run(refreshADCRegisters);
 
                 }
                 else break;
-                if (AutoRefresh.IsChecked.Value && usb_connection.Connected)
+                if (AutoRefresh.IsChecked.Value && connectionStatus)
                 {
                     DAC_Registers.ItemsSource = await Task.Run(refreshDACRegisters);
                 }
                 else break;
-                if (AutoRefresh.IsChecked.Value && usb_connection.Connected)
+                if (AutoRefresh.IsChecked.Value && connectionStatus)
                 {
                     SEL_Registers.ItemsSource = await Task.Run(refreshSELRegisters);
 
@@ -611,10 +630,28 @@ namespace CWDM_Control_Board_GUI
                 ReadProgress.Dispatcher.Invoke(new Action(() => ReadProgress.Value = 0));
             }
         }
-
+        public void ToggleConnection(bool currentStatus) {
+            if (currentStatus)
+            {
+                usb_connection.DisconnectDevice();
+            }
+            else
+            {
+                usb_connection.ConnectDevice();
+                if (!connectionStatus)
+                {
+                    string messageBoxText = "Unable to connect to selected device.";
+                    string caption = "Connection Failed!";
+                    MessageBoxButton button = MessageBoxButton.OK;
+                    MessageBoxImage icon = MessageBoxImage.Error;
+                    MessageBox.Show(messageBoxText, caption, button, icon);
+                }
+            }
+        }
         private async void Connection_Click(object sender, RoutedEventArgs e)
         {
-            bool currentStatus = usb_connection.Connected;
+
+            bool currentStatus = connectionStatus;
             string pidStr = PID_Textbox.Text.ToLower();
             string vidStr = VID_Textbox.Text.ToLower();
             if(!currentStatus &&!(vidStr.Equals("") || pidStr.Equals("")))
@@ -654,30 +691,15 @@ namespace CWDM_Control_Board_GUI
                     }
                 }
             }
-            if (currentStatus)
-            {
-                usb_connection.DisconnectDevice();
-            }
-            else
-            {
-                 usb_connection.ConnectDevice();
-				if (!usb_connection.Connected)
-				{
-                    string messageBoxText = "Unable to connect to selected device.";
-                    string caption = "Connection Failed!";
-                    MessageBoxButton button = MessageBoxButton.OK;
-                    MessageBoxImage icon = MessageBoxImage.Error;
-                    MessageBox.Show(messageBoxText, caption, button, icon);
-                }
-            }
+            ToggleConnection(currentStatus);
             OnPropertyChanged("ConnectionText");
             OnPropertyChanged("ConnectionStatus");
             OnPropertyChanged("SettingsGridVisibility");
-            if (usb_connection.Connected)
+            if (connectionStatus)
             {
                 
 #pragma warning disable CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
-                Task.Run(CheckConnection);
+                CheckConnection();
 #pragma warning restore CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
                 RefreshButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 //ADC_Registers.ItemsSource = await Task.Run(refreshADCRegisters);
@@ -687,28 +709,28 @@ namespace CWDM_Control_Board_GUI
             
         }
 
-        private void CheckConnection()
+        private async void CheckConnection()
         {
-            if (!usb_connection.Connected) return;
+            if (!connectionStatus) return;
             else
             {
                 while (true) {
                     bool statusUpdate = usb_connection.ConnectionStatus();
                     if (!statusUpdate)
                     {
-                        usb_connection.Connected = statusUpdate;
+                       usb_connection.Connected = statusUpdate;
                         OnPropertyChanged("ConnectionText");
                         OnPropertyChanged("ConnectionStatus");
                         break;
                     }
-                    Thread.Sleep(100);
+                    await Task.Delay(500);
                 }
             }
         }
 
         private async void RefreshButton_Click(object sender, RoutedEventArgs e)
         {
-            if (!usb_connection.Connected) return;
+            if (!connectionStatus) return;
             RefreshButtonEnabled = false;
             OnPropertyChanged("RefreshButtonEnabled");
             ADC_Registers.ItemsSource = await Task.Run(refreshADCRegisters);
@@ -932,7 +954,7 @@ namespace CWDM_Control_Board_GUI
 
 		private void PasswordCommand_Executed(object sender, ExecutedRoutedEventArgs e)
 		{
-            if (!usb_connection.Connected) return;
+            if (!connectionStatus) return;
             if (superuserAccess)
             {
                 superuserAccess = false;
@@ -975,7 +997,129 @@ namespace CWDM_Control_Board_GUI
             #else
             #endif
         }
-    }
+
+		private async void AutotuneMUXLeft(object sender, RoutedEventArgs e)
+		{
+            if (curAutotuneTest != 0) return;
+            curAutotuneTest = 1;
+            MUX_LeftGreen.Fill = grayBrush;
+            MUX_LeftRed.Fill = grayBrush;
+            usb_connection.SendAutotuneCommand(0x01);
+            MUX_LeftOrange.Fill = orangeBrush;
+            int status = usb_connection.ReadAutotuneStatus();
+            int count = 20;
+            while(status < 5 && !abortFlag)
+			{
+                await Task.Delay(500);
+                status = usb_connection.ReadAutotuneStatus();
+                if (count-- == 0) break;
+			}
+            MUX_LeftOrange.Fill = grayBrush;
+			if (abortFlag)
+			{
+                MUX_LeftRed.Fill = redBrush;
+                abortFlag = false;
+            }
+			else
+			{
+                MUX_LeftGreen.Fill = greenBrush;
+			}
+            curAutotuneTest = 0;
+        }
+
+        private async void AutotuneMUXRight(object sender, RoutedEventArgs e)
+        {
+            if (curAutotuneTest != 0) return;
+            curAutotuneTest = 2;
+            MUX_RightGreen.Fill = grayBrush;
+            MUX_RightRed.Fill = grayBrush;
+            usb_connection.SendAutotuneCommand(0x02);
+            MUX_RightOrange.Fill = orangeBrush;
+            int status = usb_connection.ReadAutotuneStatus();
+            int count = 20;
+            while (status < 5 && !abortFlag)
+            {
+                await Task.Delay(500);
+                status = usb_connection.ReadAutotuneStatus();
+                if (count-- == 0) break;
+            }
+            MUX_RightOrange.Fill = grayBrush;
+            if (abortFlag)
+            {
+                MUX_RightRed.Fill = redBrush;
+                abortFlag = false;
+            }
+            else
+            {
+                MUX_RightGreen.Fill = greenBrush;
+            }
+            curAutotuneTest = 0;
+        }
+
+        private async void AutotuneDMUXLeft(object sender, RoutedEventArgs e)
+        {
+            if (curAutotuneTest != 0) return;
+            curAutotuneTest = 3;
+            DMUX_LeftGreen.Fill = grayBrush;
+            DMUX_LeftRed.Fill = grayBrush;
+            usb_connection.SendAutotuneCommand(0x03);
+            DMUX_LeftOrange.Fill = orangeBrush;
+            int status = usb_connection.ReadAutotuneStatus();
+            int count = 20;
+            while (status < 5 && !abortFlag)
+            {
+                await Task.Delay(500);
+                status = usb_connection.ReadAutotuneStatus();
+                if (count-- == 0) break;
+            }
+            DMUX_LeftOrange.Fill = grayBrush;
+            if (abortFlag)
+            {
+                DMUX_LeftRed.Fill = redBrush;
+                abortFlag = false;
+            }
+            else
+            {
+                DMUX_LeftGreen.Fill = greenBrush;
+            }
+            curAutotuneTest = 0;
+        }
+
+        private async void AutotuneDMUXRight(object sender, RoutedEventArgs e)
+        {
+            if (curAutotuneTest != 0) return;
+            curAutotuneTest = 4;
+            DMUX_RightGreen.Fill = grayBrush;
+            DMUX_RightRed.Fill = grayBrush;
+            usb_connection.SendAutotuneCommand(0x04);
+            DMUX_RightOrange.Fill = orangeBrush;
+            int status = usb_connection.ReadAutotuneStatus();
+            int count = 20;
+            while (status < 5 && !abortFlag)
+            {
+                await Task.Delay(500);
+                status = usb_connection.ReadAutotuneStatus();
+                if (count-- == 0) break;
+            }
+            DMUX_RightOrange.Fill = grayBrush;
+            if (abortFlag)
+            {
+                DMUX_RightRed.Fill = redBrush;
+                abortFlag = false;
+            }
+            else
+            {
+                DMUX_RightGreen.Fill = greenBrush;
+            }
+            curAutotuneTest = 0;
+        }
+
+        private void Abort(object sender, RoutedEventArgs e)
+		{
+            abortFlag = true;
+            usb_connection.SendAutotuneCommand(0xAA55);
+		}
+	}
 	public abstract class BSLOutputBridge
 	{
         public abstract void PrintOutput(string value);

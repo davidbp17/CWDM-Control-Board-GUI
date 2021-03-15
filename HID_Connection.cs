@@ -3,33 +3,41 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using HidLibrary;
 namespace CWDM_Control_Board_GUI
 {
     class HID_Connection
     {
-        private int vid;
-        private int pid;
-        private const int default_vid = 0x1FC9;
-        private const int default_pid = 0x8248;
-        private const int default_uninstalled_pid = 0x0130;
-        private bool protected_mode;
-        const byte AUTOTUNE_ID = 0x04;
-        const byte AUTOTUNE_STATUS_ID = 0x05;
-        const byte WRITE_MSG_ID = 0x04;
-        const byte READ_MSG_ID = 0x01;
-        const byte READ_INPUT_MSG_ID = 0x03;
-        const byte WRITE_MSG_LEN = 0x06;
-        const byte READ_MSG_LEN = 0x04;
-        const int WRITE_COMM_ERROR = -1;
-        const int READ_COMM_ERROR = -2;
-        const int READ_MISMATCH = -3;
-        const int CONNECTION_ERROR = -4;
-        const int THREAD_CLOSED_ERROR = -5;
-        const int PROTECTED_MODE_ERROR = -6;
-        private static HidDevice _device;
+        protected int vid;
+        protected int pid;
+        protected const int default_vid = 0x1FC9;
+        protected const int default_pid = 0x8248;
+        protected const int default_uninstalled_pid = 0x0130;
+        protected bool protected_mode;
+        protected enum MessageID: byte {
+            AUTOTUNE_ID = 0x04,
+            AUTOTUNE_STATUS_ID = 0x05,
+            WRITE_MSG_ID = 0x04,
+            READ_MSG_ID = 0x01,
+            READ_INPUT_MSG_ID = 0x03,
+            WRITE_MSG_LEN = 0x06,
+            READ_MSG_LEN = 0x04
+        }
+        public enum ErrorMessage: int
+        {
+            WRITE_COMM_ERROR = -1,
+            READ_COMM_ERROR = -2,
+            READ_MISMATCH = -3,
+            CONNECTION_ERROR = -4,
+            THREAD_CLOSED_ERROR = -5,
+            PROTECTED_MODE_ERROR = -6,
+            NO_DATA_ERROR = -7,
+            WAIT_ERROR = -8
+        }
+        protected static HidDevice _device;
         public bool Connected = false;
-        private static Mutex mutex;
+        protected static Mutex mutex;
 
         public HID_Connection()
         {
@@ -86,20 +94,8 @@ namespace CWDM_Control_Board_GUI
 
         public bool ConnectionStatus()
 		{
-            if (!Connected) return false;
-            bool tmpStatus = false;
-            try
-            {
-                mutex.WaitOne();
-                tmpStatus = _device.IsConnected;
-                mutex.ReleaseMutex();
-            }
-            catch(ObjectDisposedException ex)
-			{
-                return false;
-			}
-            return tmpStatus;
-		}
+            return _device.IsConnected;
+ 		}
 
         public void DisconnectDevice()
         {
@@ -112,10 +108,18 @@ namespace CWDM_Control_Board_GUI
         public byte[] AutotuneDataArray(ushort test)
         {
             byte[] newData = new byte[64];
-            newData[1] = AUTOTUNE_ID;
-            newData[2] = READ_MSG_LEN; //Read Message Length
+            newData[1] = (byte)MessageID.AUTOTUNE_ID;
+            newData[2] = (byte)MessageID.READ_MSG_LEN; 
             newData[3] = (byte)(test);
             newData[4] = (byte)(test >> 8);
+            return newData;
+        }
+
+        public byte[] AutotuneStatusArray()
+        {
+            byte[] newData = new byte[64];
+            newData[1] = (byte)MessageID.AUTOTUNE_STATUS_ID;
+            newData[2] = (byte)MessageID.READ_MSG_LEN; //Leave it as Read Message Length
             return newData;
         }
         public int SendAutotuneCommand(ushort test, int delay = 100)
@@ -126,55 +130,73 @@ namespace CWDM_Control_Board_GUI
             }
             catch (ObjectDisposedException)
             {
-                return THREAD_CLOSED_ERROR;
+                return (int) ErrorMessage.THREAD_CLOSED_ERROR;
             }
             if (protected_mode)
             {
                 mutex.ReleaseMutex();
-                return PROTECTED_MODE_ERROR;
+                return (int) ErrorMessage.PROTECTED_MODE_ERROR;
             }
             protected_mode = true;
             byte[] writeData = AutotuneDataArray(test);
             bool writeSuccess = _device.Write(writeData, delay);
             mutex.ReleaseMutex();
-            if (!writeSuccess) return WRITE_COMM_ERROR;
+            if (!writeSuccess) return (int) ErrorMessage.WRITE_COMM_ERROR;
             return 0;
 
 
         }
-        public int SendWriteCommand(ushort register, ushort val,int delay = 100)
-        {
-            if (protected_mode) return PROTECTED_MODE_ERROR;
+        public int ReadAutotuneStatus()
+		{
             try
             {
                 mutex.WaitOne();
             }
             catch (ObjectDisposedException)
             {
-                return THREAD_CLOSED_ERROR;
+                return (int)ErrorMessage.THREAD_CLOSED_ERROR;
+            }
+            byte[] writeData = AutotuneStatusArray();
+            bool writeSuccess = _device.Write(writeData);
+            if (!writeSuccess) return (int)ErrorMessage.WRITE_COMM_ERROR;
+            byte[] readArray = _device.Read().Data;
+            if(readArray[0] > 4 || readArray[1] > 4)
+                protected_mode = false;
+            int status = 0;
+            if (readArray[0] == 0)
+                status = readArray[1];
+            else
+                status = readArray[0];
+            mutex.ReleaseMutex();
+            
+            return status;
+        }
+        public int SendWriteCommand(ushort register, ushort val,int delay = 100)
+        {
+            if (protected_mode) return (int)ErrorMessage.PROTECTED_MODE_ERROR;
+            try
+            {
+                mutex.WaitOne();
+            }
+            catch (ObjectDisposedException)
+            {
+                return (int) ErrorMessage.THREAD_CLOSED_ERROR;
             }
             if (!Connected)
             {
                 mutex.ReleaseMutex();
-                return CONNECTION_ERROR;
+                return (int)ErrorMessage.CONNECTION_ERROR;
             }
             byte[] writeData = WriteDataArray(register, val);
             bool writeSuccess = _device.Write(writeData, delay);
+
+            mutex.ReleaseMutex();
             if (!writeSuccess)
             {
-                mutex.ReleaseMutex();
-                return WRITE_COMM_ERROR;
+                return (int)ErrorMessage.WRITE_COMM_ERROR;
 
             }
-            byte[] readArray = _device.Read(delay).Data;
-            try
-            {
-                mutex.ReleaseMutex();
-            }
-            catch (ObjectDisposedException)
-            {
-
-            }
+            
             return 0;
         }
 
@@ -182,38 +204,38 @@ namespace CWDM_Control_Board_GUI
 
         public int SendReadCommand(ushort register, int delay = 100)
         {
-            if (protected_mode) return PROTECTED_MODE_ERROR;
+            if (protected_mode) return (int)ErrorMessage.PROTECTED_MODE_ERROR;
             try
             {
                 mutex.WaitOne();
             }
             catch (ObjectDisposedException)
             {
-                return THREAD_CLOSED_ERROR;
+                return (int)ErrorMessage.THREAD_CLOSED_ERROR;
             }
             if (!Connected)
             {
                 mutex.ReleaseMutex();
-                return CONNECTION_ERROR;
+                return (int)ErrorMessage.CONNECTION_ERROR;
             }
             byte[] readCommandData = ReadDataArray(register);
             bool writeSuccess = _device.Write(readCommandData, delay);
             if (!writeSuccess)
             {
                 mutex.ReleaseMutex();
-                return WRITE_COMM_ERROR;
+                return (int)ErrorMessage.WRITE_COMM_ERROR;
             }
             byte[] readArray = _device.Read(delay).Data;
             (bool readStatus, ushort regRead, ushort value) = ReadValue(readArray);
             if (!readStatus)
 			{
                 mutex.ReleaseMutex();
-                return READ_COMM_ERROR;
+                return (int)ErrorMessage.READ_COMM_ERROR;
 			}
             if (regRead != register)
             {
                 mutex.ReleaseMutex();
-                return READ_MISMATCH;
+                return (int)ErrorMessage.READ_MISMATCH;
 
             }
             mutex.ReleaseMutex();
@@ -222,20 +244,16 @@ namespace CWDM_Control_Board_GUI
 
         public int[] SendReadCommands(ushort[] registers, int delay = 100)
         {
-            if(protected_mode) return new int[] { PROTECTED_MODE_ERROR};
+            if(protected_mode) return new int[] { (int)ErrorMessage.PROTECTED_MODE_ERROR };
             int len = registers.Length<=10 ? registers.Length : 10;
             int[] values = new int[len];
-            for(int i = 0; i < values.Length; i++)
-			{
-                values[i] = READ_COMM_ERROR;
-			}
             try
             {
                 mutex.WaitOne();
             }
             catch (ObjectDisposedException)
             {
-                return new int[] { THREAD_CLOSED_ERROR };
+                return new int[] { (int)ErrorMessage.THREAD_CLOSED_ERROR };
             }
             if (!Connected)
             {
@@ -245,9 +263,9 @@ namespace CWDM_Control_Board_GUI
                 }
                 catch(System.ObjectDisposedException ex)
 				{
-                    return new int[] { CONNECTION_ERROR };
+                    return new int[] { (int)ErrorMessage.CONNECTION_ERROR };
                 }
-                return new int[] { CONNECTION_ERROR };
+                return new int[] { (int)ErrorMessage.CONNECTION_ERROR };
             }
             byte[] readCommandData = ReadDataArray(registers);
             bool writeSuccess = _device.Write(readCommandData, delay);
@@ -259,9 +277,9 @@ namespace CWDM_Control_Board_GUI
                 }
                 catch(ObjectDisposedException ex)
 				{
-                    return new int[] { THREAD_CLOSED_ERROR };
+                    return new int[] { (int)ErrorMessage.THREAD_CLOSED_ERROR };
                 }
-                return new int[] { WRITE_COMM_ERROR };
+                return new int[] { (int)ErrorMessage.WRITE_COMM_ERROR };
             }
 
             byte[] readArray = _device.Read(delay).Data;
@@ -284,7 +302,7 @@ namespace CWDM_Control_Board_GUI
             }
             catch (ObjectDisposedException ex)
             {
-                return new int[] { THREAD_CLOSED_ERROR };
+                return new int[] { (int)ErrorMessage.THREAD_CLOSED_ERROR };
             }
             return values;
         }
@@ -292,8 +310,8 @@ namespace CWDM_Control_Board_GUI
         public byte[] WriteDataArray(ushort register, ushort val)
         {
             byte[] writeData = new byte[64];
-            writeData[1] = WRITE_MSG_ID;//Should be 0x04
-            writeData[2] = WRITE_MSG_LEN; //Write Message Length
+            writeData[1] = (byte)MessageID.WRITE_MSG_ID;//Should be 0x04
+            writeData[2] = (byte)MessageID.WRITE_MSG_LEN; //Write Message Length
             writeData[3] = (byte)(register);//last 8 bits
             writeData[4] = (byte)(register >> 8);//first 8 bits
             writeData[5] = (byte)(val);//last 8 bits
@@ -311,8 +329,8 @@ namespace CWDM_Control_Board_GUI
 
             for (int i = 0; i < register.Length && 6*(i+1) < 64; i++)
             {
-                writeData[1 + (i * 6)] = WRITE_MSG_ID;//Should be 0x04
-                writeData[2 + (i * 6)] =  WRITE_MSG_LEN; //Write Message Length
+                writeData[1 + (i * 6)] = (byte)MessageID.WRITE_MSG_ID;//Should be 0x04
+                writeData[2 + (i * 6)] = (byte)MessageID.WRITE_MSG_LEN; //Write Message Length
                 writeData[3 + (i * 6)] = (byte)(register[i]);//last 8 bits
                 writeData[4 + (i * 6)] = (byte)(register[i] >> 8);//first 8 bits
                 writeData[5 + (i * 6)] = (byte)(val[i]);//last 8 bits
@@ -323,8 +341,8 @@ namespace CWDM_Control_Board_GUI
         public byte[] ReadDataArray(ushort register)
         {
             byte[] newData = new byte[64];
-            newData[0] = READ_MSG_ID;
-            newData[1] = READ_MSG_LEN; //Read Message Length
+            newData[0] = (byte)MessageID.READ_MSG_ID;
+            newData[1] = (byte)MessageID.READ_MSG_LEN; //Read Message Length
             newData[2] = (byte)(register);
             newData[3] = (byte)(register >> 8);
             return newData;
@@ -339,8 +357,8 @@ namespace CWDM_Control_Board_GUI
             byte[] readData = new byte[64];
             for (int i = 0; i < register.Length && 4*(i+1) < 64; i++)
             {
-                readData[1 + (i * 4)] = READ_MSG_ID;//Should be 0x04
-                readData[2 + (i * 4)] = READ_MSG_LEN; //Read Message Length
+                readData[1 + (i * 4)] = (byte)MessageID.READ_MSG_ID;//Should be 0x04
+                readData[2 + (i * 4)] = (byte)MessageID.READ_MSG_LEN; //Read Message Length
                 readData[3 + (i * 4)] = (byte)(register[i]);//last 8 bits
                 readData[4 + (i * 4)] = (byte)(register[i] >> 8);//first 8 bits
             }
@@ -349,7 +367,7 @@ namespace CWDM_Control_Board_GUI
 
         public (bool, ushort, ushort) ReadValue(byte[] readData)
         {
-            if (readData[1] == READ_INPUT_MSG_ID && readData[2] == READ_MSG_LEN)
+            if (readData[1] == (byte)MessageID.READ_INPUT_MSG_ID && readData[2] == (byte)MessageID.READ_MSG_LEN)
             {
                 ushort startReg = readData[3];
                 ushort endReg = readData[4];
@@ -366,7 +384,7 @@ namespace CWDM_Control_Board_GUI
             (bool, ushort, ushort)[] readValues = new (bool, ushort, ushort)[valsExpected];
             for(int i = 0; i < valsExpected && 6*(i+1) < 64; i++)
 			{
-                if ((readData[1 + (i * 6)] == READ_INPUT_MSG_ID && readData[2 + (i * 6)] == WRITE_MSG_LEN))//||( readData[2 + (i * 6)] == WRITE_MSG_LEN && i == 1)
+                if ((readData[1 + (i * 6)] == (byte)MessageID.READ_INPUT_MSG_ID && readData[2 + (i * 6)] == (byte)MessageID.WRITE_MSG_LEN))//||( readData[2 + (i * 6)] == WRITE_MSG_LEN && i == 1)
                 {
                     ushort startReg = readData[3 + (i * 6)];
                     ushort endReg = readData[4 + (i * 6)];
@@ -383,5 +401,126 @@ namespace CWDM_Control_Board_GUI
 			}
             return readValues;
         }
+    }
+
+    class HID_CommandStatus
+	{
+		public HID_CommandStatus(int error)
+		{
+            Error = error;
+		}
+        public HID_CommandStatus(byte[] data,int error)
+        {
+            Data = data;
+            Error = error;
+        }
+        public HID_CommandStatus(HidDeviceData readData)
+		{
+            Data = readData.Data;
+			switch (readData.Status)
+			{
+                case HidDeviceData.ReadStatus.NoDataRead:
+                    Error = (int)HID_Connection.ErrorMessage.NO_DATA_ERROR;
+                    break;
+                case HidDeviceData.ReadStatus.NotConnected:
+                    Error = (int)HID_Connection.ErrorMessage.CONNECTION_ERROR;
+                    break;
+                case HidDeviceData.ReadStatus.ReadError:
+                    Error = (int)HID_Connection.ErrorMessage.READ_COMM_ERROR;
+                    break;
+                case HidDeviceData.ReadStatus.WaitFail:
+                    Error = (int)HID_Connection.ErrorMessage.WAIT_ERROR;
+                    break;
+                case HidDeviceData.ReadStatus.WaitTimedOut:
+                    Error = (int)HID_Connection.ErrorMessage.WAIT_ERROR;
+                    break;
+                default:
+                    Error = 0;
+                    break;
+
+            }
+		}
+        public byte[] Data { get; }
+        public int Error { get; }
+    }
+
+
+    class Async_HID_Connection : HID_Connection
+    {
+        public Async_HID_Connection():base()
+		{
+            
+		}
+        public Async_HID_Connection(int vid, int pid) : base(vid, pid)
+		{
+
+		}
+        private new async Task<int> SendWriteCommand(ushort register, ushort value, int delay = 100)
+		{
+            byte[] writeData = WriteDataArray(register, value);
+            Task<bool> writeTask = _device.WriteAsync(writeData);
+            bool success = await writeTask;
+            if (success) return 0;
+            return (int)ErrorMessage.WRITE_COMM_ERROR;
+        }
+        private async Task<int> SendWriteCommands(ushort[] register, ushort[] value, int delay = 100)
+        {
+            byte[] writeData = WriteDataArray(register, value);
+            Task<bool> writeTask = _device.WriteAsync(writeData);
+            bool success = await writeTask;
+            if (success) return 0;
+            return (int)ErrorMessage.WRITE_COMM_ERROR;
+        }
+        private async Task<HID_CommandStatus> AsyncReadCommand(ushort register, int delay = 100)
+        {
+            byte[] writeData = ReadDataArray(register);
+            Task<bool> writeTask = _device.WriteAsync(writeData);
+            bool success = await writeTask;
+            if (!success) return new HID_CommandStatus((int)ErrorMessage.WRITE_COMM_ERROR);
+            HidDeviceData readData = await _device.ReadAsync();
+            return new HID_CommandStatus(readData);
+        }
+
+        private async Task<HID_CommandStatus> AsyncReadCommand(ushort[] register, int delay = 100)
+        {
+            byte[] writeData = ReadDataArray(register);
+            Task<bool> writeTask = _device.WriteAsync(writeData);
+            bool success = await writeTask;
+            if (!success) return new HID_CommandStatus((int)ErrorMessage.WRITE_COMM_ERROR);
+            HidDeviceData readData = await _device.ReadAsync();
+            return new HID_CommandStatus(readData);
+        }
+
+        public new async Task<int> SendReadCommand(ushort register, int delay = 100)
+        {
+            HID_CommandStatus commandStatus = await AsyncReadCommand(register, delay);
+            if (commandStatus.Error != 0) return commandStatus.Error;
+            (bool, ushort, ushort) convertedValue = ReadValue(commandStatus.Data);
+            return convertedValue.Item2;
+
+        }
+        public new async Task<int[]> SendReadCommands(ushort[] registers, int delay = 100)
+        {
+            if (protected_mode) return new int[] { (int)ErrorMessage.PROTECTED_MODE_ERROR };
+            int len = registers.Length <= 10 ? registers.Length : 10;
+            int[] values = new int[] { (int)ErrorMessage.READ_COMM_ERROR };
+            HID_CommandStatus commandStatus = await AsyncReadCommand(registers, delay);
+            if (commandStatus.Error != 0) return new int[] { commandStatus.Error };
+            (bool, ushort, ushort)[] dataValues = ReadValues(commandStatus.Data);
+            for (int i = 0; i < dataValues.Length; i++)
+            {
+                (bool readStatus, ushort regRead, ushort value) = dataValues[i];
+                if (readStatus)
+                {
+                    int idx = Array.IndexOf(registers, regRead);
+                    if (idx == -1)
+                        continue;
+                    values[idx] = value;
+                }
+
+            }
+            return values;
+        }
+
     }
 }
