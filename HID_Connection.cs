@@ -39,6 +39,16 @@ namespace CWDM_Control_Board_GUI
         public bool Connected = false;
         protected static Mutex mutex;
 
+        private int indexOf(ushort[] arr, ushort val)
+		{
+            for(int i = 0; i < arr.Length;++i)
+			{
+                if (arr[i] == val)
+                    return i;
+			}
+            return -1;
+		}
+
         public HID_Connection()
         {
             //Default Constructor with VID and PID values
@@ -291,9 +301,13 @@ namespace CWDM_Control_Board_GUI
                 (bool readStatus, ushort regRead, ushort value) = dataValues[i];
                 if (readStatus)
                 {
-                    int idx = Array.IndexOf(registers, regRead);
+                    int idx = indexOf(registers, regRead);
                     if (idx == -1)
+					{
+                        values[i] = (int)ErrorMessage.READ_MISMATCH;
                         continue;
+					}
+                        
                     values[idx] = value;
                 }
 

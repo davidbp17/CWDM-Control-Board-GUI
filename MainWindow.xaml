@@ -26,7 +26,7 @@
         <Grid Grid.Row="0" Grid.Column="0" Background="FloralWhite" Grid.ColumnSpan="2">
 
             <TabControl Name="MainControl" SelectedIndex="1" Grid.Row="0" IsEnabled="{Binding Path=ConnectionStatus}">
-                <TabItem Name="Autotune_Heaters" Header="Autotune Heaters" IsEnabled="{Binding Path=SuperuserAccess}">
+                <TabItem Name="Autotune_Heaters" Header="Autotune Heaters" >
                     <StackPanel VerticalAlignment="Bottom">
                         <Grid>
                             <Grid.ColumnDefinitions>

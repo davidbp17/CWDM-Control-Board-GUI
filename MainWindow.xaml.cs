@@ -47,6 +47,7 @@ namespace CWDM_Control_Board_GUI
         private SolidColorBrush grayBrush;
         private int curAutotuneTest;
         private bool abortFlag = false;
+        private string curFirmwareName = "\\cwdm_fw-20210115.bin";
         public bool? ConnectionStatus
         {
             get
@@ -64,6 +65,11 @@ namespace CWDM_Control_Board_GUI
         public int BaseMode { get; set; }
 
         bool connectionStatus => usb_connection.Connected;
+
+        /*Visibility Properties
+         * Allows for binding of visibility
+         * Used for grids and buttons
+         */
         public Visibility RefreshButtonVisibility
 		{
 			get
@@ -94,7 +100,7 @@ namespace CWDM_Control_Board_GUI
             InitializeComponent();
             usb_connection = new HID_Connection();
             DataContext = this;
-            superuserAccess = true;
+            superuserAccess = false;
             greenBrush = new SolidColorBrush();
             orangeBrush = new SolidColorBrush();
             redBrush = new SolidColorBrush();
@@ -593,7 +599,7 @@ namespace CWDM_Control_Board_GUI
             #if DEBUG
             string curDir = Directory.GetCurrentDirectory();
             string baseDir = Directory.GetParent(Directory.GetParent(curDir).FullName).FullName;
-            System.Diagnostics.Process.Start(baseDir+"\\FirmwareInstall.bat", HID_Connection.DefaultVIDString()+" "+HID_Connection.DefaultUninstalledPIDString() + " \"" + baseDir+"\\cwdm_fw-20210115.bin\"");
+            System.Diagnostics.Process.Start(curDir+"\\FirmwareInstall.bat", HID_Connection.DefaultVIDString()+" "+HID_Connection.DefaultUninstalledPIDString() + " \"" + curDir+ curFirmwareName+"\"");
             #else
             #endif
         }
@@ -616,7 +622,7 @@ namespace CWDM_Control_Board_GUI
             {
                 // Open document
                 string bin_filename = openFileDialog.FileName;
-                System.Diagnostics.Process.Start(baseDir + "\\FirmwareInstall.bat", HID_Connection.DefaultVIDString() + " " + HID_Connection.DefaultUninstalledPIDString() + " \"" + bin_filename + "\"");
+                System.Diagnostics.Process.Start(curDir+"\\FirmwareInstall.bat", HID_Connection.DefaultVIDString() + " " + HID_Connection.DefaultUninstalledPIDString() + " \"" + bin_filename + "\"");
             }
             #else
             #endif
