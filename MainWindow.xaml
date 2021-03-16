@@ -235,9 +235,9 @@
                         <Label Content="Register Write" HorizontalAlignment="Center"/>
                         <UniformGrid>
                             <Label Content="Reg"/>
-                            <TextBox Name="RegisterBox" VerticalContentAlignment="Bottom"/>
+                            <TextBox Name="RegisterBox" VerticalContentAlignment="Center"/>
                             <Label Content="Value"/>
-                            <TextBox Name="ValueBox" VerticalContentAlignment="Bottom"/>
+                            <TextBox Name="ValueBox" VerticalContentAlignment="Center"/>
                         </UniformGrid>
                         <Button Content="Write" Width="70" Name="WriteButton" Click="WriteButton_Click" />
                     </StackPanel>

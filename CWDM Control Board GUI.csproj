@@ -60,6 +60,7 @@
       <SubType>Designer</SubType>
     </ApplicationDefinition>
     <Compile Include="MathOperations.cs" />
+    <Compile Include="Registers.cs" />
     <Compile Include="SuperuserMode.xaml.cs">
       <DependentUpon>SuperuserMode.xaml</DependentUpon>
     </Compile>

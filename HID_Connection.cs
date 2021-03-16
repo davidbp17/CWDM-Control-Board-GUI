@@ -73,7 +73,7 @@ namespace CWDM_Control_Board_GUI
         }
         public static string DefaultUninstalledPIDString()
         {
-            return "0x" + default_uninstalled_pid.ToString("X4");
+            return "0x" + default_uninstalled_pid.ToString("X4");//Default of NXP Devices
         }
         public void ConnectDevice()
         {
@@ -91,6 +91,11 @@ namespace CWDM_Control_Board_GUI
             mutex = new Mutex();
             Connected = true;
         }
+
+        public void SetProtectedMode(bool mode)
+		{
+            protected_mode = mode;
+		}
 
         public bool ConnectionStatus()
 		{
@@ -122,7 +127,7 @@ namespace CWDM_Control_Board_GUI
             newData[2] = (byte)MessageID.READ_MSG_LEN; //Leave it as Read Message Length
             return newData;
         }
-        public int SendAutotuneCommand(ushort test, int delay = 100)
+        public int SendAutotuneCommand(ushort test, int timeout = 100)
         {
             try
             {
@@ -137,16 +142,15 @@ namespace CWDM_Control_Board_GUI
                 mutex.ReleaseMutex();
                 return (int) ErrorMessage.PROTECTED_MODE_ERROR;
             }
-            protected_mode = true;
             byte[] writeData = AutotuneDataArray(test);
-            bool writeSuccess = _device.Write(writeData, delay);
+            bool writeSuccess = _device.Write(writeData, timeout);
             mutex.ReleaseMutex();
             if (!writeSuccess) return (int) ErrorMessage.WRITE_COMM_ERROR;
             return 0;
 
 
         }
-        public int ReadAutotuneStatus()
+        public int ReadAutotuneStatus(int timeout = 100)
 		{
             try
             {
@@ -159,9 +163,7 @@ namespace CWDM_Control_Board_GUI
             byte[] writeData = AutotuneStatusArray();
             bool writeSuccess = _device.Write(writeData);
             if (!writeSuccess) return (int)ErrorMessage.WRITE_COMM_ERROR;
-            byte[] readArray = _device.Read().Data;
-            if(readArray[0] > 4 || readArray[1] > 4)
-                protected_mode = false;
+            byte[] readArray = _device.Read(timeout).Data;
             int status = 0;
             if (readArray[0] == 0)
                 status = readArray[1];
@@ -171,7 +173,7 @@ namespace CWDM_Control_Board_GUI
             
             return status;
         }
-        public int SendWriteCommand(ushort register, ushort val,int delay = 100)
+        public int SendWriteCommand(ushort register, ushort val,int timeout = 100)
         {
             if (protected_mode) return (int)ErrorMessage.PROTECTED_MODE_ERROR;
             try
@@ -188,7 +190,7 @@ namespace CWDM_Control_Board_GUI
                 return (int)ErrorMessage.CONNECTION_ERROR;
             }
             byte[] writeData = WriteDataArray(register, val);
-            bool writeSuccess = _device.Write(writeData, delay);
+            bool writeSuccess = _device.Write(writeData, timeout);
 
             mutex.ReleaseMutex();
             if (!writeSuccess)
@@ -202,7 +204,7 @@ namespace CWDM_Control_Board_GUI
 
 
 
-        public int SendReadCommand(ushort register, int delay = 100)
+        public int SendReadCommand(ushort register, int timeout = 100)
         {
             if (protected_mode) return (int)ErrorMessage.PROTECTED_MODE_ERROR;
             try
@@ -219,13 +221,13 @@ namespace CWDM_Control_Board_GUI
                 return (int)ErrorMessage.CONNECTION_ERROR;
             }
             byte[] readCommandData = ReadDataArray(register);
-            bool writeSuccess = _device.Write(readCommandData, delay);
+            bool writeSuccess = _device.Write(readCommandData, timeout);
             if (!writeSuccess)
             {
                 mutex.ReleaseMutex();
                 return (int)ErrorMessage.WRITE_COMM_ERROR;
             }
-            byte[] readArray = _device.Read(delay).Data;
+            byte[] readArray = _device.Read(timeout).Data;
             (bool readStatus, ushort regRead, ushort value) = ReadValue(readArray);
             if (!readStatus)
 			{
@@ -242,7 +244,7 @@ namespace CWDM_Control_Board_GUI
             return value;
         }
 
-        public int[] SendReadCommands(ushort[] registers, int delay = 100)
+        public int[] SendReadCommands(ushort[] registers, int timeout = 100)
         {
             if(protected_mode) return new int[] { (int)ErrorMessage.PROTECTED_MODE_ERROR };
             int len = registers.Length<=10 ? registers.Length : 10;
@@ -268,7 +270,7 @@ namespace CWDM_Control_Board_GUI
                 return new int[] { (int)ErrorMessage.CONNECTION_ERROR };
             }
             byte[] readCommandData = ReadDataArray(registers);
-            bool writeSuccess = _device.Write(readCommandData, delay);
+            bool writeSuccess = _device.Write(readCommandData, timeout);
             if (!writeSuccess)
             {
                 try
@@ -282,7 +284,7 @@ namespace CWDM_Control_Board_GUI
                 return new int[] { (int)ErrorMessage.WRITE_COMM_ERROR };
             }
 
-            byte[] readArray = _device.Read(delay).Data;
+            byte[] readArray = _device.Read(timeout).Data;
             (bool,ushort,ushort)[] dataValues = ReadValues(readArray,len);
             for (int i = 0; i < dataValues.Length;i++)
             {
