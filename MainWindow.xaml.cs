@@ -348,7 +348,7 @@ namespace CWDM_Control_Board_GUI
                     bool statusUpdate = usb_connection.ConnectionStatus();
                     if (!statusUpdate)
                     {
-                       usb_connection.Connected = statusUpdate;
+                        usb_connection.Connected = statusUpdate;
                         OnPropertyChanged("ConnectionText");
                         OnPropertyChanged("ConnectionStatus");
                         break;
@@ -531,6 +531,7 @@ namespace CWDM_Control_Board_GUI
         }
         private void RefreshItemSources()
 		{
+            //Goes through each list of registers, refreshs the values
             var adc_regs = ADC_Registers.ItemsSource;
             if (adc_regs == null) return;
             List<Registers.ADCRegister> reformatedList = new List<Registers.ADCRegister>();
@@ -599,7 +600,15 @@ namespace CWDM_Control_Board_GUI
             #if DEBUG
             string curDir = Directory.GetCurrentDirectory();
             string baseDir = Directory.GetParent(Directory.GetParent(curDir).FullName).FullName;
-            System.Diagnostics.Process.Start(curDir+"\\FirmwareInstall.bat", HID_Connection.DefaultVIDString()+" "+HID_Connection.DefaultUninstalledPIDString() + " \"" + curDir+ curFirmwareName+"\"");
+            try
+            {
+                System.Diagnostics.Process.Start(curDir + "\\FirmwareInstall.bat", HID_Connection.DefaultVIDString() + " " + HID_Connection.DefaultUninstalledPIDString() + " \"" + curDir + curFirmwareName + "\"");
+            }
+			catch
+			{
+
+			}
+            
             #else
             #endif
         }

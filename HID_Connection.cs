@@ -109,6 +109,8 @@ namespace CWDM_Control_Board_GUI
 
         public bool ConnectionStatus()
 		{
+            if (_device == null)
+                return false;
             return _device.IsConnected;
  		}
 
@@ -216,109 +218,118 @@ namespace CWDM_Control_Board_GUI
 
         public int SendReadCommand(ushort register, int timeout = 100)
         {
-            if (protected_mode) return (int)ErrorMessage.PROTECTED_MODE_ERROR;
+            (bool readStatus, ushort regRead, ushort value) = (false, 0, 0);
+            bool writeError = false;
+            if (protected_mode) 
+                return (int)ErrorMessage.PROTECTED_MODE_ERROR;
+            if (!Connected)
+            {
+                return (int)ErrorMessage.CONNECTION_ERROR;
+            }
             try
             {
                 mutex.WaitOne();
+                byte[] readCommandData = ReadDataArray(register);
+                bool writeSuccess = _device.Write(readCommandData, timeout);
+                if (writeSuccess)
+                {
+                    byte[] readArray = _device.Read(timeout).Data;
+                    (readStatus, regRead, value) = ReadValue(readArray);
+                }
+                else
+                    writeError = true;
+                
             }
             catch (ObjectDisposedException)
             {
                 return (int)ErrorMessage.THREAD_CLOSED_ERROR;
             }
-            if (!Connected)
-            {
-                mutex.ReleaseMutex();
-                return (int)ErrorMessage.CONNECTION_ERROR;
+			finally
+			{
+                try
+                {
+                    mutex.ReleaseMutex();
+                }
+				catch (ObjectDisposedException)
+                {
+					unchecked
+                    {
+                        value = (ushort)ErrorMessage.THREAD_CLOSED_ERROR;
+                    }
+                }
             }
-            byte[] readCommandData = ReadDataArray(register);
-            bool writeSuccess = _device.Write(readCommandData, timeout);
-            if (!writeSuccess)
-            {
-                mutex.ReleaseMutex();
+			if (writeError)
+			{
                 return (int)ErrorMessage.WRITE_COMM_ERROR;
             }
-            byte[] readArray = _device.Read(timeout).Data;
-            (bool readStatus, ushort regRead, ushort value) = ReadValue(readArray);
             if (!readStatus)
 			{
-                mutex.ReleaseMutex();
                 return (int)ErrorMessage.READ_COMM_ERROR;
 			}
             if (regRead != register)
             {
-                mutex.ReleaseMutex();
                 return (int)ErrorMessage.READ_MISMATCH;
-
             }
-            mutex.ReleaseMutex();
             return value;
         }
-
+        //Method for sending multiple reads at once
         public int[] SendReadCommands(ushort[] registers, int timeout = 100)
         {
-            if(protected_mode) return new int[] { (int)ErrorMessage.PROTECTED_MODE_ERROR };
+            if(protected_mode) 
+                return new int[] { (int)ErrorMessage.PROTECTED_MODE_ERROR };
+            if (!Connected)
+                return new int[] { (int)ErrorMessage.CONNECTION_ERROR };
+            bool writeError = false;
             int len = registers.Length<=10 ? registers.Length : 10;
             int[] values = new int[len];
             try
             {
                 mutex.WaitOne();
+                byte[] readCommandData = ReadDataArray(registers);
+                bool writeSuccess = _device.Write(readCommandData, timeout);
+                if (writeSuccess)
+                {
+                    byte[] readArray = _device.Read(timeout).Data;
+                    (bool, ushort, ushort)[] dataValues = ReadValues(readArray, len);
+                    for (int i = 0; i < dataValues.Length; i++)
+                    {
+                        (bool readStatus, ushort regRead, ushort value) = dataValues[i];
+                        if (readStatus)
+                        {
+                            int idx = indexOf(registers, regRead);
+                            if (idx == -1)
+                            {
+                                values[i] = (int)ErrorMessage.READ_MISMATCH;
+                                continue;
+                            }
+
+                            values[idx] = value;
+                        }
+
+                    }
+                }
+                else
+                    writeError = true;
+
             }
             catch (ObjectDisposedException)
             {
                 return new int[] { (int)ErrorMessage.THREAD_CLOSED_ERROR };
             }
-            if (!Connected)
+            finally
             {
                 try
                 {
                     mutex.ReleaseMutex();
                 }
-                catch(System.ObjectDisposedException ex)
-				{
-                    return new int[] { (int)ErrorMessage.CONNECTION_ERROR };
+                catch (ObjectDisposedException)
+                {
+                    values = new int[] {(int) ErrorMessage.THREAD_CLOSED_ERROR };
                 }
-                return new int[] { (int)ErrorMessage.CONNECTION_ERROR };
             }
-            byte[] readCommandData = ReadDataArray(registers);
-            bool writeSuccess = _device.Write(readCommandData, timeout);
-            if (!writeSuccess)
+            if (writeError)
             {
-                try
-                {
-                    mutex.ReleaseMutex();
-                }
-                catch(ObjectDisposedException ex)
-				{
-                    return new int[] { (int)ErrorMessage.THREAD_CLOSED_ERROR };
-                }
                 return new int[] { (int)ErrorMessage.WRITE_COMM_ERROR };
-            }
-
-            byte[] readArray = _device.Read(timeout).Data;
-            (bool,ushort,ushort)[] dataValues = ReadValues(readArray,len);
-            for (int i = 0; i < dataValues.Length;i++)
-            {
-                (bool readStatus, ushort regRead, ushort value) = dataValues[i];
-                if (readStatus)
-                {
-                    int idx = indexOf(registers, regRead);
-                    if (idx == -1)
-					{
-                        values[i] = (int)ErrorMessage.READ_MISMATCH;
-                        continue;
-					}
-                        
-                    values[idx] = value;
-                }
-
-            }
-            try
-            {
-                mutex.ReleaseMutex();
-            }
-            catch (ObjectDisposedException ex)
-            {
-                return new int[] { (int)ErrorMessage.THREAD_CLOSED_ERROR };
             }
             return values;
         }

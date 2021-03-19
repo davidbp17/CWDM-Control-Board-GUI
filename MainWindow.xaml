@@ -192,7 +192,7 @@
                         </Grid>
                     </Grid>
                 </TabItem>
-                <TabItem Header="Board Scripting Language" >
+                <TabItem Header="Board Scripting Language" IsEnabled="{Binding Path=SuperuserAccess}">
                     <StackPanel>
                         <RichTextBox Name="CodeBox" Width="500" Height="200" HorizontalAlignment="Left" VerticalAlignment="Top" FontFamily="Consolas" AcceptsTab="True" Margin="0,0,0,10" TextChanged="CodeBox_TextChanged" VerticalScrollBarVisibility="Auto">
                             <RichTextBox.Resources>
